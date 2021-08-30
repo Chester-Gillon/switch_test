@@ -9,6 +9,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <time.h>
 
 #ifndef _WIN32
 #include <arpa/inet.h>
@@ -31,7 +32,7 @@ typedef struct
 
 
 /** Define a locally administated MAC address and VLAN for each switch port under test */
-#define NUM_TEST_PORTS
+#define NUM_TEST_PORTS 4
 static port_id_t test_ports[NUM_TEST_PORTS] =
 {
     { .mac_addr = {2,0,1,0,0,9}, .vlan = 1009},
@@ -223,6 +224,14 @@ static pcap_t *open_interface (const char *const interface_name)
 }
 
 
+/**
+ * @brief Create a EtherCAT test frame which can be sent.
+ * @details The EtherCAT commands and datagram contents are not significant; have just used values which populate
+ *          a maximum length frame and for which Wireshark reports a valid frame (for debugging).
+ * @param frame[out] The populated frame which can be transmitted.
+ * @param source_port_index[in] The index into test_ports[] which selects the source MAC address and outgoing VLAN.
+ * @param destination_port_index[in] The index into test_ports[] which selects the destination MAC address.
+ */
 static void create_test_frame (ethercat_frame_t *const frame, 
                                const uint32_t source_port_index, const uint32_t destination_port_index)
 {
@@ -270,16 +279,36 @@ int main (int argc, char *argv[])
     pcap_t *const pcap_handle = open_interface (interface_name);
 
     ethercat_frame_t frame;
-    create_test_frame (&frame, 0, 1);
-    
-    /* Send down the packet */
-    if (pcap_sendpacket(pcap_handle,
-            (const u_char *) &frame,
-            sizeof (frame)
-            ) != 0)
+
+    /* Send packets using all combination of source and destination ports.
+     * Initially just has a 100 ms delay between sends so can run Wireshark and manually check which
+     * packets get received back on which VLANs. */
+    const struct timespec delay = 
     {
-        fprintf(stderr,"\nError sending the packet: %s\n", pcap_geterr(pcap_handle));
-        return 3;
+        .tv_sec = 0,
+        .tv_nsec = 1000000
+    };
+    for (uint32_t source_port_index = 0; source_port_index < NUM_TEST_PORTS; source_port_index++)
+    {
+        for (uint32_t destination_port_index = 0; destination_port_index < NUM_TEST_PORTS; destination_port_index++)
+        {
+            if (source_port_index != destination_port_index)
+            {
+                create_test_frame (&frame, source_port_index, destination_port_index);
+    
+                /* Send down the packet */
+                if (pcap_sendpacket(pcap_handle,
+                        (const u_char *) &frame,
+                        sizeof (frame)
+                        ) != 0)
+                {
+                    fprintf(stderr,"\nError sending the packet: %s\n", pcap_geterr(pcap_handle));
+                    return 3;
+                }
+                
+                nanosleep (&delay, NULL);
+            }
+        }
     }
 
     pcap_close (pcap_handle);

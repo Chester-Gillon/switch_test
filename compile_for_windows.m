@@ -43,11 +43,16 @@ if ~isfolder (exe_dir)
 end
 
 % Compile the program.
-% The PATH is set to the MinGW directory as gcc needs to load some DLLs in
-% the same directory.
+% a. The PATH is set to the MinGW directory as gcc needs to load some DLLs
+%    in the same directory.
+% b. The static pthread avoids DLL dependencies.
+% c. The -mno-ms-bitfields is required to get the size of the 
+%    ethercat_frame_t structure correct which contains bit-fields spanning
+%    16-bits and 32-bit fields.
 system(['set PATH=' mingw_path ';%PATH && ' ...
     gcc_exe ' -Wall -mno-ms-bitfields ' fullfile(build_root, 'switch_test_main.c') ...
     ' -o '  fullfile(exe_dir,'switch_test.exe') ...
+    ' -Wl,-Bstatic -lpthread -Wl,-Bdynamic ' ...
     ' ' npcap_options]);
 
 end
