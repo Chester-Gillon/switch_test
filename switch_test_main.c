@@ -210,6 +210,16 @@ static pcap_t *open_interface (const char *const interface_name)
         exit (EXIT_FAILURE);
     }
     
+    /* Disable the timeout to allow pcap_next_ex() to poll for packets.
+       From the documentation this might not be supported on all systems, but has worked on Windows 10 and a Linux 3.10 Kernel. */
+    const int no_timeout = -1;
+    rc = pcap_set_timeout (pcap_handle, no_timeout);
+    if (rc != 0)
+    {
+        fprintf (stderr, "Error in pcap_set_timeout(): %s\n", pcap_statustostr (rc));
+        exit (EXIT_FAILURE);
+    }
+    
     /* Activate the interface for use */
     rc = pcap_activate (pcap_handle);
     if (rc < 0)
