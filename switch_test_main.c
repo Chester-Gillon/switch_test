@@ -18,6 +18,13 @@
 #include <pcap.h>
 
 
+#define NSECS_PER_SEC 1000000000LL
+
+/* Ethernet frame types */
+#define ETH_P_8021Q    0x8100
+#define ETH_P_ETHERCAT 0x88a4
+
+
 #define ETHER_MAC_ADDRESS_LEN 6
 
 /** Defines the unique identity used for one switch port under test.
@@ -87,6 +94,10 @@ typedef struct __attribute__((packed))
     uint8_t data[ETHERCAT_DATAGRAM_LEN]; /* Data to be read or written */
     uint16_t WKC;     /* Working Counter */
 } ethercat_frame_t;
+
+
+/* Next transmit sequence number inserted in the Address of the EtherCAT frame */
+static uint32_t next_transmit_sequence_number;
 
 
 /**
@@ -244,11 +255,9 @@ static void create_test_frame (ethercat_frame_t *const frame,
             sizeof (frame->source_mac_addr));
     
     /* VLAN */
-	const uint16_t ETH_P_8021Q = 0x8100;
     frame->ether_type = htons (ETH_P_8021Q);
     frame->vlan_tci = htons (test_ports[source_port_index].vlan);
 
-    const uint16_t ETH_P_ETHERCAT = 0x88a4;
     frame->vlan_ether_type = htons (ETH_P_ETHERCAT);
     
     frame->Length = sizeof (ethercat_frame_t) - offsetof (ethercat_frame_t, Cmd);
@@ -261,6 +270,28 @@ static void create_test_frame (ethercat_frame_t *const frame,
     {
         frame->data[data_index] = fill_value++;
     }
+    
+    frame->Address = next_transmit_sequence_number;
+    next_transmit_sequence_number++;
+}
+
+
+/*
+ * @brief Return a monotonic time in integer nanoseconds
+ */
+static int64_t get_monotonic_time (void)
+{
+    int rc;
+    struct timespec now;
+    
+    rc = clock_gettime (CLOCK_MONOTONIC, &now);
+    if (rc != 0)
+    {
+        fprintf (stderr, "clock_getime(CLOCK_MONOTONIC) failed\n");
+        exit (EXIT_FAILURE);
+    }
+    
+    return (now.tv_sec * NSECS_PER_SEC) + now.tv_nsec;
 }
 
 
@@ -278,40 +309,104 @@ int main (int argc, char *argv[])
     
     pcap_t *const pcap_handle = open_interface (interface_name);
 
-    ethercat_frame_t frame;
-
-    /* Send packets using all combination of source and destination ports.
-     * Initially just has a 100 ms delay between sends so can run Wireshark and manually check which
-     * packets get received back on which VLANs. */
-    const struct timespec delay = 
-    {
-        .tv_sec = 0,
-        .tv_nsec = 1000000
-    };
-    for (uint32_t source_port_index = 0; source_port_index < NUM_TEST_PORTS; source_port_index++)
-    {
-        for (uint32_t destination_port_index = 0; destination_port_index < NUM_TEST_PORTS; destination_port_index++)
-        {
-            if (source_port_index != destination_port_index)
-            {
-                create_test_frame (&frame, source_port_index, destination_port_index);
+    ethercat_frame_t tx_frame;
+    struct pcap_pkthdr *pkt_header = NULL;
+    const u_char *pkt_data = NULL;
     
-                /* Send down the packet */
-                if (pcap_sendpacket(pcap_handle,
-                        (const u_char *) &frame,
-                        sizeof (frame)
-                        ) != 0)
+    const int64_t start_time = get_monotonic_time ();
+    const int64_t stop_time = start_time + (10 * NSECS_PER_SEC);
+    int64_t now;
+    int rc;
+    
+    /* Set to transmit one frame at a slow rate of every 100 ms just to visualise what is received */
+    const int64_t send_interval = 100000000;
+    int64_t next_frame_send_time = start_time;
+    
+    uint32_t source_port_index = 0;
+    uint32_t destination_port_index = 1;
+    
+    uint64_t num_tx_test_frames = 0;
+    uint64_t num_rx_test_frames = 0;
+    uint64_t num_other_rx_frames = 0;
+    
+    /* Run test for a fix period of time, sending frames at a fixed rate and recording which are received.
+       This uses a busy-polling loop to determine when is time for the next transmit frame, or to poll for
+       received frames. */
+    do
+    {
+        now = get_monotonic_time ();
+        
+        if (now >= next_frame_send_time)
+        {
+            /* Send the next frame, cycling around combinations of the source and destination ports */
+            create_test_frame (&tx_frame, source_port_index, destination_port_index);
+            rc = pcap_sendpacket (pcap_handle, (const u_char *) &tx_frame, sizeof (tx_frame));
+            if (rc != 0)
+            {
+                fprintf(stderr,"\nError sending the packet: %s\n", pcap_geterr(pcap_handle));
+                exit (EXIT_FAILURE);
+            }
+            num_tx_test_frames++;
+            next_frame_send_time += send_interval;
+            
+            do
+            {
+                source_port_index = (source_port_index + 1) % NUM_TEST_PORTS;
+                if (source_port_index == 0)
                 {
-                    fprintf(stderr,"\nError sending the packet: %s\n", pcap_geterr(pcap_handle));
-                    return 3;
+                    destination_port_index = (destination_port_index + 1) % NUM_TEST_PORTS;
+                }
+            } while (source_port_index == destination_port_index);
+        }
+        else
+        {
+            /* Poll for receipt of packet */
+            rc = pcap_next_ex (pcap_handle, &pkt_header, &pkt_data);
+            if (rc == PCAP_ERROR)
+            {
+                fprintf(stderr,"\nError receiving packet: %s\n", pcap_geterr(pcap_handle));
+                exit (EXIT_FAILURE);
+            }
+            else if (rc == 1)
+            {
+                /* Packet received */
+                bool is_test_frame = pkt_header->len >= sizeof (ethercat_frame_t);
+                
+                if (is_test_frame)
+                {
+                    const ethercat_frame_t *const rx_frame = (const ethercat_frame_t *) pkt_data;
+                    
+                    is_test_frame = (ntohs (rx_frame->ether_type) == ETH_P_8021Q) &&
+                            (ntohs (rx_frame->vlan_ether_type) == ETH_P_ETHERCAT);
                 }
                 
-                nanosleep (&delay, NULL);
+                if (is_test_frame)
+                {
+                    num_rx_test_frames++;
+                }
+                else
+                {
+                    num_other_rx_frames++;
+                }
             }
         }
+    } while (now < stop_time);
+    now = get_monotonic_time ();
+    
+    struct pcap_stat statistics;
+    rc = pcap_stats (pcap_handle, &statistics);
+    if (rc == PCAP_ERROR)
+    {
+        fprintf(stderr,"\npcap_stats() failed: %s\n", pcap_geterr(pcap_handle));
+        exit (EXIT_FAILURE);
     }
 
     pcap_close (pcap_handle);
+
+    printf ("Elapsed time %.6f\n", (now - start_time) / 1E9);
+    printf ("ps_recv=%u ps_drop=%u ps_ifdrop=%u\n", statistics.ps_recv, statistics.ps_drop, statistics.ps_ifdrop);
+    printf ("num_tx_test_frames=%" PRIu64 " num_rx_test_frames=%" PRIu64 " num_other_rx_frames=%" PRIu64 "\n",
+            num_tx_test_frames, num_rx_test_frames, num_other_rx_frames);
     
     return EXIT_SUCCESS;
 }
