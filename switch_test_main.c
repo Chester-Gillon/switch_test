@@ -96,6 +96,56 @@ typedef struct __attribute__((packed))
 } ethercat_frame_t;
 
 
+/* Identifies one type of frame recorded by the test */
+typedef enum
+{
+    /* A frame transmitted by the test */
+    FRAME_RECORD_TX_TEST_FRAME,
+    /* A frame received by the test, which matches that of the EtherCAT frame transmitted */
+    FRAME_RECORD_RX_TEST_FRAME,
+    /* A frame received by the test, which isn't one transmitted */
+    FRAME_RECORD_RX_OTHER,
+    
+    FRAME_RECORD_ARRAY_SIZE
+} frame_record_type_t;
+
+
+/* Used to record one frame transmitted or received during the test */
+typedef struct
+{
+    /* Identifies the type of frame */
+    frame_record_type_t frame_type;
+    /* The relative time from the start of the test that the frame was sent or received.
+       This is using the monotonic time used by the test busy-polling loop rather than the receive time
+       recorded in the pcap packet header. */
+    int64_t relative_test_time;
+    /* The destination and source MAC addresses from the frame */
+    uint8_t destination_mac_addr[ETHER_MAC_ADDRESS_LEN];
+    uint8_t source_mac_addr[ETHER_MAC_ADDRESS_LEN];
+    /* The length of the frame */
+    bpf_u_int32 len;
+    /* The ether type of the frame, the field this is extracted from depends upon if there is a VLAN */
+    uint16_t ether_type;
+    /* True if the frame was for a VLAN */
+    bool vlan_present;
+    /* When vlan_present is true identifies the VLAN this was for */
+    uint16_t vlan_id;
+    /* When frame_type is FRAME_RECORD_TX_TEST_FRAME or FRAME_RECORD_RX_TEST_FRAME the sequence number of the frame.
+     * Allows received frames to be matched against the transmitted frame. */
+    uint32_t test_sequence_number;
+} frame_record_t;
+
+
+/* Used to count the frames sent/received during the test */
+static uint64_t frame_counts[FRAME_RECORD_ARRAY_SIZE];
+
+
+/* Used to record the frames sent/received during the test */
+#define MAX_FRAME_RECORDS 1000000
+static frame_record_t *frame_records;
+static uint32_t num_frame_records;
+
+
 /* Next transmit sequence number inserted in the Address of the EtherCAT frame */
 static uint32_t next_transmit_sequence_number;
 
@@ -305,6 +355,152 @@ static int64_t get_monotonic_time (void)
 }
 
 
+/*
+ * @brief Record information about an Ethernet frame transmitted or received during a test
+ * @param[in] pkt_header When non-null the received packet header.
+ *                       When NULL indicates are being called to record a transmitted test frame
+ * @param[in] frame The frame to record information for
+ * @param[in] start_time The start monotonic time for the test, used to record the relative time for the frame
+ */
+static void record_test_frame (const struct pcap_pkthdr *const pkt_header, const ethercat_frame_t *const frame,
+                               const int64_t start_time)
+{
+    frame_record_type_t frame_type;
+    bpf_u_int32 len;
+    
+    const uint16_t ether_type = ntohs (frame->ether_type);
+    const uint16_t vlan_ether_type = ntohs (frame->vlan_ether_type);
+    
+    if (pkt_header != NULL)
+    {
+        /* Determine if the receive frame is one sent by the test program or not */
+        bool is_test_frame = pkt_header->len >= sizeof (ethercat_frame_t);
+        
+        if (is_test_frame)
+        {
+            is_test_frame = (ether_type == ETH_P_8021Q) && (vlan_ether_type == ETH_P_ETHERCAT);
+        }
+        
+        frame_type = is_test_frame ? FRAME_RECORD_RX_TEST_FRAME : FRAME_RECORD_RX_OTHER;
+        len = pkt_header->len;
+    }
+    else
+    {
+        frame_type = FRAME_RECORD_TX_TEST_FRAME;
+        len = sizeof (ethercat_frame_t);
+    }
+    
+    /* Store the frame summary if space */
+    if (num_frame_records < MAX_FRAME_RECORDS)
+    {
+        frame_record_t *const frame_record = &frame_records[num_frame_records];
+        
+        frame_record->frame_type = frame_type;
+        frame_record->relative_test_time = get_monotonic_time () - start_time;
+        memcpy (frame_record->destination_mac_addr, frame->destination_mac_addr, sizeof (frame_record->destination_mac_addr));
+        memcpy (frame_record->source_mac_addr, frame->source_mac_addr, sizeof (frame_record->source_mac_addr));
+        frame_record->len = len;
+        frame_record->vlan_present = ether_type == ETH_P_8021Q;
+        if (frame_record->vlan_present)
+        {
+            frame_record->ether_type = vlan_ether_type;
+            frame_record->vlan_id = ntohs (frame->vlan_tci);
+        }
+        else
+        {
+            frame_record->ether_type = ether_type;
+        }
+        
+        if (frame_type != FRAME_RECORD_RX_OTHER)
+        {
+            frame_record->test_sequence_number = frame->Address;
+        }
+            
+        num_frame_records++;
+    }
+    
+    /* Maintain the frame counts */
+    frame_counts[frame_type]++;
+}
+
+
+/**
+ * @brief Write a hexadecimal MAC address to a CSV file
+ * @param[in/out] csv_file File to write to
+ * @param[in] mac_addr The MAC address to write
+ */
+static void write_mac_addr (FILE *const csv_file, const uint8_t *const mac_addr)
+{
+    for (uint32_t byte_index = 0; byte_index < ETHER_MAC_ADDRESS_LEN; byte_index++)
+    {
+        fprintf (csv_file, "%s%02X", (byte_index == 0) ? ", " : "-", mac_addr[byte_index]);
+    }
+}
+
+
+/**
+ * @brief write a CSV file which contains information about the frames transmitted and received during the test
+ */
+static void write_recorded_frames (void)
+{
+    const time_t now = time (NULL);
+    struct tm broken_down_time;
+    char csv_filename[80];
+    
+    const char *const frame_type_names[FRAME_RECORD_ARRAY_SIZE] =
+    {
+        [FRAME_RECORD_TX_TEST_FRAME] = "Tx test",
+        [FRAME_RECORD_RX_TEST_FRAME] = "Rx test",
+        [FRAME_RECORD_RX_OTHER     ] = "Rx other"
+    };
+    
+    /* Create a CSV filename containing the current date/time */
+    localtime_r (&now, &broken_down_time);
+    strftime (csv_filename, sizeof (csv_filename), "frames_%Y%m%dT%H%M%S.csv", &broken_down_time);
+    printf ("Saving frame results to %s\n", csv_filename);
+    
+    /* Create CSV file and write headers */
+    FILE *csv_file = fopen (csv_filename, "w");
+    if (csv_file == NULL)
+    {
+        fprintf (stderr, "Failed to create %s\n", csv_filename);
+        exit (EXIT_FAILURE);
+    }
+    fprintf (csv_file, "frame type,relative test time (secs),destination MAC addr,source MAC addr,len,ether type,VLAN,test sequence number\n");
+    
+    /* Write one row for each frame recorded for the test */
+    for (uint32_t frame_index = 0; frame_index < num_frame_records; frame_index++)
+    {
+        const frame_record_t *const frame_record = &frame_records[frame_index];
+        
+        fprintf (csv_file, "%s,%.6f",
+                frame_type_names[frame_record->frame_type], frame_record->relative_test_time / 1E9);
+        write_mac_addr (csv_file, frame_record->destination_mac_addr);
+        write_mac_addr (csv_file, frame_record->source_mac_addr);
+        fprintf (csv_file, ",%u,'%04x", frame_record->len, frame_record->ether_type);
+        if (frame_record->vlan_present)
+        {
+            fprintf (csv_file, ",%" PRIu32, frame_record->vlan_id);
+        }
+        else
+        {
+            fprintf (csv_file, ",");
+        }
+        if (frame_record->frame_type != FRAME_RECORD_RX_OTHER)
+        {
+            fprintf (csv_file, ",%" PRIu32, frame_record->test_sequence_number);
+        }
+        else
+        {
+            fprintf (csv_file, ",");
+        }
+       fprintf (csv_file, "\n");
+    }
+    
+    fclose (csv_file);
+}
+
+
 int main (int argc, char *argv[])
 {
     /* Check that ethercat_frame_t has the expected size */
@@ -313,6 +509,10 @@ int main (int argc, char *argv[])
         fprintf (stderr, "sizeof (ethercat_frame_t) unexpected value of %" PRIuPTR "\n", sizeof (ethercat_frame_t));
         exit (EXIT_FAILURE);
     }
+    
+    /* Allocate space to record test frames */
+    frame_records = calloc (MAX_FRAME_RECORDS, sizeof (frame_records[0]));
+    num_frame_records = 0;
     
     /* When an interface name is provided on the command line then use that, otherwise ask the user */
     const char *const interface_name = (argc > 1) ? argv[1] : select_interface ();
@@ -335,10 +535,6 @@ int main (int argc, char *argv[])
     uint32_t source_port_index = 0;
     uint32_t destination_port_index = 1;
     
-    uint64_t num_tx_test_frames = 0;
-    uint64_t num_rx_test_frames = 0;
-    uint64_t num_other_rx_frames = 0;
-    
     /* Run test for a fix period of time, sending frames at a fixed rate and recording which are received.
        This uses a busy-polling loop to determine when is time for the next transmit frame, or to poll for
        received frames. */
@@ -356,7 +552,7 @@ int main (int argc, char *argv[])
                 fprintf(stderr,"\nError sending the packet: %s\n", pcap_geterr(pcap_handle));
                 exit (EXIT_FAILURE);
             }
-            num_tx_test_frames++;
+            record_test_frame (NULL, &tx_frame, start_time);
             next_frame_send_time += send_interval;
             
             do
@@ -380,24 +576,7 @@ int main (int argc, char *argv[])
             else if (rc == 1)
             {
                 /* Packet received */
-                bool is_test_frame = pkt_header->len >= sizeof (ethercat_frame_t);
-                
-                if (is_test_frame)
-                {
-                    const ethercat_frame_t *const rx_frame = (const ethercat_frame_t *) pkt_data;
-                    
-                    is_test_frame = (ntohs (rx_frame->ether_type) == ETH_P_8021Q) &&
-                            (ntohs (rx_frame->vlan_ether_type) == ETH_P_ETHERCAT);
-                }
-                
-                if (is_test_frame)
-                {
-                    num_rx_test_frames++;
-                }
-                else
-                {
-                    num_other_rx_frames++;
-                }
+                record_test_frame (pkt_header, (const ethercat_frame_t *) pkt_data, start_time);
             }
         }
     } while (now < stop_time);
@@ -413,10 +592,13 @@ int main (int argc, char *argv[])
 
     pcap_close (pcap_handle);
 
+    write_recorded_frames ();
     printf ("Elapsed time %.6f\n", (now - start_time) / 1E9);
     printf ("ps_recv=%u ps_drop=%u ps_ifdrop=%u\n", statistics.ps_recv, statistics.ps_drop, statistics.ps_ifdrop);
     printf ("num_tx_test_frames=%" PRIu64 " num_rx_test_frames=%" PRIu64 " num_other_rx_frames=%" PRIu64 "\n",
-            num_tx_test_frames, num_rx_test_frames, num_other_rx_frames);
+            frame_counts[FRAME_RECORD_TX_TEST_FRAME],
+            frame_counts[FRAME_RECORD_RX_TEST_FRAME],
+            frame_counts[FRAME_RECORD_RX_OTHER]);
     
     return EXIT_SUCCESS;
 }
