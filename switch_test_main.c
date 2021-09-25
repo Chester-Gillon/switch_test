@@ -282,7 +282,20 @@ static pcap_t *open_interface (const char *const interface_name)
         printf ("Warning in pcap_activate(): %s\n", pcap_statustostr (rc));
     }
     
-    /* Set a filter to only receive packets which have EtherCAT protocol encapsulated within a VNAN,
+    /* Capture only the receive frames, and not our transmit frames */
+    
+    /* This has been commented out since with a Intel Corporation 82579V Gigabit Network Connection:
+       a. Under Windows 10 failed with PCAP_ERROR.
+       b. Under CentOS 6.10 with a 3.10.33-rt32.33.el6rt.x86_64 Kernel with libpcap 1.4.0 worked.
+    rc = pcap_setdirection (pcap_handle, PCAP_D_IN);
+    if (rc != 0)
+    {
+        fprintf (stderr, "Error in pcap_setdirection(): %s\n", pcap_statustostr (rc));
+        exit (EXIT_FAILURE);
+    }
+    */
+    
+    /* Set a filter to only receive packets which have EtherCAT protocol encapsulated within a VLAN,
      * which are those sent/received by the test program.
      * I.e. filter out packets for other traffic.
      * The filter has to be compiled after the pcap handle has been activited, so that the link-layer is known. */
