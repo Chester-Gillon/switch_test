@@ -282,6 +282,36 @@ static pcap_t *open_interface (const char *const interface_name)
         printf ("Warning in pcap_activate(): %s\n", pcap_statustostr (rc));
     }
     
+    /* Set a filter to only receive packets which have EtherCAT protocol encapsulated within a VNAN,
+     * which are those sent/received by the test program.
+     * I.e. filter out packets for other traffic.
+     * The filter has to be compiled after the pcap handle has been activited, so that the link-layer is known. */
+
+    /* This has been commented out since with a Intel Corporation 82579V Gigabit Network Connection:
+       a. Under Windows 10 the filter worked as expected.
+       b. Under CentOS 6.10 with a 3.10.33-rt32.33.el6rt.x86_64 Kernel with libpcap 1.4.0 the filter had the effect of not 
+          capturing any receive EtherCAT frames, and only capturing the transmitted frames.
+          The same issue occurred when using the same filter in Wireshark.
+
+    char filter_command[80];
+    struct bpf_program filter_program;
+    snprintf (filter_command, sizeof (filter_command), "vlan&&ether proto 0x%x", ETH_P_ETHERCAT);
+    const int optimize = 1;
+    rc = pcap_compile (pcap_handle, &filter_program, filter_command, optimize, 0xffffffff);
+    if (rc != 0)
+    {
+        fprintf (stderr, "Error in pcap_compile(): %s\n", pcap_statustostr (rc));
+        exit (EXIT_FAILURE);
+    }
+    
+    rc = pcap_setfilter (pcap_handle, &filter_program);
+    if (rc != 0)
+    {
+        fprintf (stderr, "Error in pcap_setfilter(): %s\n", pcap_statustostr (rc));
+        exit (EXIT_FAILURE);
+    }
+    */
+    
     /* Check the interface is Ethernet */
     const int link_layer = pcap_datalink (pcap_handle);
     if (link_layer != DLT_EN10MB)
