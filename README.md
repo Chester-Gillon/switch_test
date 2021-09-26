@@ -96,3 +96,69 @@ Frame 273: 100 bytes on wire (800 bits), 100 bytes captured (800 bits) on interf
 Ethernet II, Src: MS-NLB-PhysServer-02_02:02:02:02 (02:02:02:02:02:02), Dst: Private_01:01:01 (01:01:01:01:01:01)
 802.1Q Virtual LAN, PRI: 0, DEI: 0, ID: 1009
 Internet Protocol Version 4
+
+
+==========================================
+
+Test with all ports connected to a Netgear DG834G under test which shows a pass:
+C:\Users\mr_halfword\switch_test\Debug>switch_test \Device\NPF_{478AF94A-7EC1-4E69-A500-E966D8ECCBDF}
+Saving frame results to frames_20210926T160120.csv
+Elapsed time 12.090039
+ps_recv=2402 ps_drop=0 ps_ifdrop=0
+num_tx_test_frames=1200 num_rx_test_frames=2402 num_other_rx_frames=0
+
+Test sent 100 frames for each combination of source and destination ports
+Count of correctly received frames:
+source  destination ports --->
+port         0       1       2       3
+     0             100     100     100
+     1     100             100     100
+     2     100     100             100
+     3     100     100     100
+
+Test: PASS
+
+Prior to starting the test there was no activity shown on the switch ports under test
+
+Removed the cable to switch port index 2 prior to starting the test, to cause a fault:
+C:\Users\mr_halfword\switch_test\Debug>switch_test \Device\NPF_{478AF94A-7EC1-4E69-A500-E966D8ECCBDF}
+Saving frame results to frames_20210926T160255.csv
+Elapsed time 12.090052
+ps_recv=1805 ps_drop=0 ps_ifdrop=0
+num_tx_test_frames=1200 num_rx_test_frames=1800 num_other_rx_frames=5
+
+Test sent 100 frames for each combination of source and destination ports
+Count of correctly received frames:
+source  destination ports --->
+port         0       1       2       3
+     0             100       0     100
+     1     100               0     100
+     2       0       0               0
+     3     100     100       0
+
+Test: FAIL
+
+
+Change the switch under test to be a Level One GSW-2472TGX
+The LEDS on port index 0 where flashing on the injection switch and switch under test prior to starting the test,
+which reported some missing frames for port index 0:
+C:\Users\mr_halfword\switch_test\Debug>switch_test \Device\NPF_{478AF94A-7EC1-4E69-A500-E966D8ECCBDF}
+Saving frame results to frames_20210926T162611.csv
+Elapsed time 12.090030
+ps_recv=1899 ps_drop=0 ps_ifdrop=0
+num_tx_test_frames=1200 num_rx_test_frames=1898 num_other_rx_frames=1
+
+Test sent 100 frames for each combination of source and destination ports
+Count of correctly received frames:
+source  destination ports --->
+port         0       1       2       3
+     0               9      14      25
+     1      13             100     100
+     2      22     100             100
+     3      13     100     100
+
+Test: FAIL
+
+However, on investigation the cable used for port index 0 was suspect as the issue:
+a. Followed the cable when moved to a different port.
+b. Went away when replaced the cable.
