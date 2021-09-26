@@ -39,9 +39,11 @@ typedef struct
 
 
 /** Define a locally administated MAC address and VLAN for each switch port under test */
-#define NUM_TEST_PORTS 5
+#define NUM_TEST_PORTS 7
 static port_id_t test_ports[NUM_TEST_PORTS] =
 {
+    { .mac_addr = {2,0,1,0,0,3}, .vlan = 1003},
+    { .mac_addr = {2,0,1,0,0,5}, .vlan = 1005},
     { .mac_addr = {2,0,1,0,0,7}, .vlan = 1007},
     { .mac_addr = {2,0,1,0,0,9}, .vlan = 1009},
     { .mac_addr = {2,0,1,0,1,1}, .vlan = 1011},

@@ -162,3 +162,121 @@ Test: FAIL
 However, on investigation the cable used for port index 0 was suspect as the issue:
 a. Followed the cable when moved to a different port.
 b. Went away when replaced the cable.
+
+
+==========================
+
+The number of ports used was inceased to 7, with the switch under test the Level One GSW-2472TGX
+
+The VLAN configuration in the injection switch:
+DES-3526:4#show vlan
+Command: show vlan
+
+VID             : 1          VLAN Name     : default
+VLAN TYPE       : static     Advertisement : Enabled
+Member ports    : 1-2,4,6,8,10,12,14,16-26
+Static ports    : 1-2,4,6,8,10,12,14,16-26
+Current Untagged ports : 1-2,4,6,8,10,12,14,16-26
+Static Untagged ports  : 1-2,4,6,8,10,12,14,16-26
+Forbidden ports :
+
+VID             : 1003       VLAN Name     : port3
+VLAN TYPE       : static     Advertisement : Disabled
+Member ports    : 3,25
+Static ports    : 3,25
+Current Untagged ports : 3
+Static Untagged ports  : 3
+Forbidden ports :
+
+VID             : 1005       VLAN Name     : port5
+VLAN TYPE       : static     Advertisement : Disabled
+Member ports    : 5,25
+Static ports    : 5,25
+Current Untagged ports : 5
+Static Untagged ports  : 5
+Forbidden ports :
+
+VID             : 1007       VLAN Name     : port7
+VLAN TYPE       : static     Advertisement : Disabled
+Member ports    : 7,25
+Static ports    : 7,25
+Current Untagged ports : 7
+Static Untagged ports  : 7
+Forbidden ports :
+
+VID             : 1009       VLAN Name     : port9
+VLAN TYPE       : static     Advertisement : Disabled
+Member ports    : 9,25
+Static ports    : 9,25
+Current Untagged ports : 9
+Static Untagged ports  : 9
+Forbidden ports :
+
+VID             : 1011       VLAN Name     : port11
+VLAN TYPE       : static     Advertisement : Disabled
+Member ports    : 11,25
+Static ports    : 11,25
+Current Untagged ports : 11
+Static Untagged ports  : 11
+Forbidden ports :
+
+VID             : 1013       VLAN Name     : port13
+VLAN TYPE       : static     Advertisement : Disabled
+Member ports    : 13,25
+Static ports    : 13,25
+Current Untagged ports : 13
+Static Untagged ports  : 13
+Forbidden ports :
+
+VID             : 1015       VLAN Name     : port15
+VLAN TYPE       : static     Advertisement : Disabled
+Member ports    : 15,25
+Static ports    : 15,25
+Current Untagged ports : 15
+Static Untagged ports  : 15
+Forbidden ports :
+
+Total Entries : 8
+
+A test pass with all cables connected:
+C:\Users\mr_halfword\switch_test\Debug>switch_test \Device\NPF_{478AF94A-7EC1-4E69-A500-E966D8ECCBDF}
+Saving frame results to frames_20210926T175550.csv
+Elapsed time 42.090049
+ps_recv=8405 ps_drop=0 ps_ifdrop=0
+num_tx_test_frames=4200 num_rx_test_frames=8405 num_other_rx_frames=0
+
+Test sent 100 frames for each combination of source and destination ports
+Count of correctly received frames:
+source  destination ports --->
+port         0       1       2       3       4       5       6
+     0             100     100     100     100     100     100
+     1     100             100     100     100     100     100
+     2     100     100             100     100     100     100
+     3     100     100     100             100     100     100
+     4     100     100     100     100             100     100
+     5     100     100     100     100     100             100
+     6     100     100     100     100     100     100
+
+Test: PASS
+
+
+An failure introduced by removing the cable for port index 3:
+C:\Users\mr_halfword\switch_test\Debug>switch_test \Device\NPF_{478AF94A-7EC1-4E69-A500-E966D8ECCBDF}
+Saving frame results to frames_20210926T175922.csv
+Elapsed time 42.090076
+ps_recv=7204 ps_drop=0 ps_ifdrop=0
+num_tx_test_frames=4200 num_rx_test_frames=7200 num_other_rx_frames=4
+
+Test sent 100 frames for each combination of source and destination ports
+Count of correctly received frames:
+source  destination ports --->
+port         0       1       2       3       4       5       6
+     0             100     100       0     100     100     100
+     1     100             100       0     100     100     100
+     2     100     100               0     100     100     100
+     3       0       0       0               0       0       0
+     4     100     100     100       0             100     100
+     5     100     100     100       0     100             100
+     6     100     100     100       0     100     100
+
+Test: FAIL
