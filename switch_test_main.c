@@ -39,16 +39,33 @@ typedef struct
 
 
 /** Define a locally administated MAC address and VLAN for each switch port under test */
-#define NUM_TEST_PORTS 7
+#define NUM_TEST_PORTS 24
 static port_id_t test_ports[NUM_TEST_PORTS] =
 {
+    { .mac_addr = {2,0,1,0,0,1}, .vlan = 1001},
+    { .mac_addr = {2,0,1,0,0,2}, .vlan = 1002},
     { .mac_addr = {2,0,1,0,0,3}, .vlan = 1003},
+    { .mac_addr = {2,0,1,0,0,4}, .vlan = 1004},
     { .mac_addr = {2,0,1,0,0,5}, .vlan = 1005},
+    { .mac_addr = {2,0,1,0,0,6}, .vlan = 1006},
     { .mac_addr = {2,0,1,0,0,7}, .vlan = 1007},
+    { .mac_addr = {2,0,1,0,0,8}, .vlan = 1008},
     { .mac_addr = {2,0,1,0,0,9}, .vlan = 1009},
+    { .mac_addr = {2,0,1,0,1,0}, .vlan = 1010},
     { .mac_addr = {2,0,1,0,1,1}, .vlan = 1011},
+    { .mac_addr = {2,0,1,0,1,2}, .vlan = 1012},
     { .mac_addr = {2,0,1,0,1,3}, .vlan = 1013},
+    { .mac_addr = {2,0,1,0,1,4}, .vlan = 1014},
     { .mac_addr = {2,0,1,0,1,5}, .vlan = 1015},
+    { .mac_addr = {2,0,1,0,1,6}, .vlan = 1016},
+    { .mac_addr = {2,0,1,0,1,7}, .vlan = 1017},
+    { .mac_addr = {2,0,1,0,1,8}, .vlan = 1018},
+    { .mac_addr = {2,0,1,0,1,9}, .vlan = 1019},
+    { .mac_addr = {2,0,1,0,2,0}, .vlan = 1020},
+    { .mac_addr = {2,0,1,0,2,1}, .vlan = 1021},
+    { .mac_addr = {2,0,1,0,2,2}, .vlan = 1022},
+    { .mac_addr = {2,0,1,0,2,3}, .vlan = 1023},
+    { .mac_addr = {2,0,1,0,2,4}, .vlan = 1024},
 };
 
 
@@ -708,8 +725,8 @@ int main (int argc, char *argv[])
     int64_t now;
     int rc;
     
-    /* Set to transmit one frame a rate of every 10 ms */
-    const int64_t send_interval = 10000000;
+    /* Set to transmit one frame a rate of every 1 ms */
+    const int64_t send_interval = 1000000;
     int64_t next_frame_send_time = start_time;
     
     uint32_t destination_port_index = 0;
