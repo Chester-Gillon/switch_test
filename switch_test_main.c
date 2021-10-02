@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
+#include <stdarg.h>
 
 #ifndef _WIN32
 #include <arpa/inet.h>
@@ -30,9 +31,13 @@
 /** Defines the unique identity used for one switch port under test.
  *  The MAC address is used by the switch under test to route traffic to the expected port.
  *  The VLAN is used by the injection switch.
+ *
+ *  The switch_port_number is that of the switch under test, controlled by the cabling and the VLAN assignment,
+ *  i.e. for information and not set by the software.
  */
 typedef struct
 {
+    uint32_t switch_port_number;
     uint8_t mac_addr[ETHER_MAC_ADDRESS_LEN];
     uint16_t vlan;
 } port_id_t;
@@ -42,30 +47,30 @@ typedef struct
 #define NUM_TEST_PORTS 24
 static port_id_t test_ports[NUM_TEST_PORTS] =
 {
-    { .mac_addr = {2,0,1,0,0,1}, .vlan = 1001},
-    { .mac_addr = {2,0,1,0,0,2}, .vlan = 1002},
-    { .mac_addr = {2,0,1,0,0,3}, .vlan = 1003},
-    { .mac_addr = {2,0,1,0,0,4}, .vlan = 1004},
-    { .mac_addr = {2,0,1,0,0,5}, .vlan = 1005},
-    { .mac_addr = {2,0,1,0,0,6}, .vlan = 1006},
-    { .mac_addr = {2,0,1,0,0,7}, .vlan = 1007},
-    { .mac_addr = {2,0,1,0,0,8}, .vlan = 1008},
-    { .mac_addr = {2,0,1,0,0,9}, .vlan = 1009},
-    { .mac_addr = {2,0,1,0,1,0}, .vlan = 1010},
-    { .mac_addr = {2,0,1,0,1,1}, .vlan = 1011},
-    { .mac_addr = {2,0,1,0,1,2}, .vlan = 1012},
-    { .mac_addr = {2,0,1,0,1,3}, .vlan = 1013},
-    { .mac_addr = {2,0,1,0,1,4}, .vlan = 1014},
-    { .mac_addr = {2,0,1,0,1,5}, .vlan = 1015},
-    { .mac_addr = {2,0,1,0,1,6}, .vlan = 1016},
-    { .mac_addr = {2,0,1,0,1,7}, .vlan = 1017},
-    { .mac_addr = {2,0,1,0,1,8}, .vlan = 1018},
-    { .mac_addr = {2,0,1,0,1,9}, .vlan = 1019},
-    { .mac_addr = {2,0,1,0,2,0}, .vlan = 1020},
-    { .mac_addr = {2,0,1,0,2,1}, .vlan = 1021},
-    { .mac_addr = {2,0,1,0,2,2}, .vlan = 1022},
-    { .mac_addr = {2,0,1,0,2,3}, .vlan = 1023},
-    { .mac_addr = {2,0,1,0,2,4}, .vlan = 1024},
+    { .switch_port_number =  1, .mac_addr = {2,0,1,0,0,1}, .vlan = 1001},
+    { .switch_port_number =  2, .mac_addr = {2,0,1,0,0,2}, .vlan = 1002},
+    { .switch_port_number =  3, .mac_addr = {2,0,1,0,0,3}, .vlan = 1003},
+    { .switch_port_number =  4, .mac_addr = {2,0,1,0,0,4}, .vlan = 1004},
+    { .switch_port_number =  5, .mac_addr = {2,0,1,0,0,5}, .vlan = 1005},
+    { .switch_port_number =  6, .mac_addr = {2,0,1,0,0,6}, .vlan = 1006},
+    { .switch_port_number =  7, .mac_addr = {2,0,1,0,0,7}, .vlan = 1007},
+    { .switch_port_number =  8, .mac_addr = {2,0,1,0,0,8}, .vlan = 1008},
+    { .switch_port_number =  9, .mac_addr = {2,0,1,0,0,9}, .vlan = 1009},
+    { .switch_port_number = 10, .mac_addr = {2,0,1,0,1,0}, .vlan = 1010},
+    { .switch_port_number = 11, .mac_addr = {2,0,1,0,1,1}, .vlan = 1011},
+    { .switch_port_number = 12, .mac_addr = {2,0,1,0,1,2}, .vlan = 1012},
+    { .switch_port_number = 13, .mac_addr = {2,0,1,0,1,3}, .vlan = 1013},
+    { .switch_port_number = 14, .mac_addr = {2,0,1,0,1,4}, .vlan = 1014},
+    { .switch_port_number = 15, .mac_addr = {2,0,1,0,1,5}, .vlan = 1015},
+    { .switch_port_number = 16, .mac_addr = {2,0,1,0,1,6}, .vlan = 1016},
+    { .switch_port_number = 17, .mac_addr = {2,0,1,0,1,7}, .vlan = 1017},
+    { .switch_port_number = 18, .mac_addr = {2,0,1,0,1,8}, .vlan = 1018},
+    { .switch_port_number = 19, .mac_addr = {2,0,1,0,1,9}, .vlan = 1019},
+    { .switch_port_number = 20, .mac_addr = {2,0,1,0,2,0}, .vlan = 1020},
+    { .switch_port_number = 21, .mac_addr = {2,0,1,0,2,1}, .vlan = 1021},
+    { .switch_port_number = 22, .mac_addr = {2,0,1,0,2,2}, .vlan = 1022},
+    { .switch_port_number = 23, .mac_addr = {2,0,1,0,2,3}, .vlan = 1023},
+    { .switch_port_number = 24, .mac_addr = {2,0,1,0,2,4}, .vlan = 1024},
 };
 
 
@@ -170,6 +175,30 @@ static uint32_t num_frame_records;
 static uint32_t next_transmit_sequence_number;
 
 
+/* File used to store a copy of the output written to the console */
+static FILE *console_file;
+
+
+/*
+ * @brief Write formatted output to the console and a log file
+ * @param[in] format printf style format string
+ * @param[in] ... printf arguments
+ */
+static void console_printf (const char *const format, ...) __attribute__((format(printf,1,2)));
+static void console_printf (const char *const format, ...)
+{
+    va_list args;
+    
+    va_start (args, format);
+    vfprintf (console_file, format, args);
+    va_end (args);
+    
+    va_start (args, format);
+    vprintf (format, args);
+    va_end (args);
+}
+
+
 /**
  * @brief Select which network interface to use for the switch test.
  * @details Gets the list of interfaces from NPCAP and prompts the user.
@@ -248,7 +277,7 @@ static pcap_t *open_interface (const char *const interface_name)
     
     if (pcap_handle == NULL)
     {
-        fprintf (stderr,"Error in pcap_create(): %s\n", errbuf);
+        console_printf ("Error in pcap_create(): %s\n", errbuf);
         exit (EXIT_FAILURE);
     }
     
@@ -257,7 +286,7 @@ static pcap_t *open_interface (const char *const interface_name)
     rc = pcap_set_promisc (pcap_handle, promisc_enable);
     if (rc != 0)
     {
-        fprintf (stderr, "Error in pcap_set_promisc(): %s\n", pcap_statustostr (rc));
+        console_printf ("Error in pcap_set_promisc(): %s\n", pcap_statustostr (rc));
         exit (EXIT_FAILURE);
     }
     
@@ -266,7 +295,7 @@ static pcap_t *open_interface (const char *const interface_name)
     rc = pcap_set_snaplen (pcap_handle, max_snaplen);
     if (rc != 0)
     {
-        fprintf (stderr, "Error in pcap_set_snaplen(): %s\n", pcap_statustostr (rc));
+        console_printf ("Error in pcap_set_snaplen(): %s\n", pcap_statustostr (rc));
         exit (EXIT_FAILURE);
     }
     
@@ -276,7 +305,7 @@ static pcap_t *open_interface (const char *const interface_name)
     rc = pcap_set_immediate_mode (pcap_handle, immediate_mode);
     if (rc != 0)
     {
-        fprintf (stderr, "Error in pcap_set_immediate_mode(): %s\n", pcap_statustostr (rc));
+        console_printf ("Error in pcap_set_immediate_mode(): %s\n", pcap_statustostr (rc));
         exit (EXIT_FAILURE);
     }
     
@@ -286,7 +315,7 @@ static pcap_t *open_interface (const char *const interface_name)
     rc = pcap_set_timeout (pcap_handle, no_timeout);
     if (rc != 0)
     {
-        fprintf (stderr, "Error in pcap_set_timeout(): %s\n", pcap_statustostr (rc));
+        console_printf ("Error in pcap_set_timeout(): %s\n", pcap_statustostr (rc));
         exit (EXIT_FAILURE);
     }
     
@@ -294,12 +323,12 @@ static pcap_t *open_interface (const char *const interface_name)
     rc = pcap_activate (pcap_handle);
     if (rc < 0)
     {
-        fprintf (stderr, "Error in pcap_activate(): %s\n", pcap_statustostr (rc));
+        console_printf ("Error in pcap_activate(): %s\n", pcap_statustostr (rc));
         exit (EXIT_FAILURE);
     }
     else if (rc > 0)
     {
-        printf ("Warning in pcap_activate(): %s\n", pcap_statustostr (rc));
+        console_printf ("Warning in pcap_activate(): %s\n", pcap_statustostr (rc));
     }
     
     /* Capture only the receive frames, and not our transmit frames */
@@ -310,7 +339,7 @@ static pcap_t *open_interface (const char *const interface_name)
     rc = pcap_setdirection (pcap_handle, PCAP_D_IN);
     if (rc != 0)
     {
-        fprintf (stderr, "Error in pcap_setdirection(): %s\n", pcap_statustostr (rc));
+        console_printf ("Error in pcap_setdirection(): %s\n", pcap_statustostr (rc));
         exit (EXIT_FAILURE);
     }
     */
@@ -333,14 +362,14 @@ static pcap_t *open_interface (const char *const interface_name)
     rc = pcap_compile (pcap_handle, &filter_program, filter_command, optimize, 0xffffffff);
     if (rc != 0)
     {
-        fprintf (stderr, "Error in pcap_compile(): %s\n", pcap_statustostr (rc));
+        console_printf ("Error in pcap_compile(): %s\n", pcap_statustostr (rc));
         exit (EXIT_FAILURE);
     }
     
     rc = pcap_setfilter (pcap_handle, &filter_program);
     if (rc != 0)
     {
-        fprintf (stderr, "Error in pcap_setfilter(): %s\n", pcap_statustostr (rc));
+        console_printf ("Error in pcap_setfilter(): %s\n", pcap_statustostr (rc));
         exit (EXIT_FAILURE);
     }
     */
@@ -349,7 +378,7 @@ static pcap_t *open_interface (const char *const interface_name)
     const int link_layer = pcap_datalink (pcap_handle);
     if (link_layer != DLT_EN10MB)
     {
-        fprintf (stderr, "This program only operates on an Ethernet link layer pcap_datalink(%s); returned %d\n",
+        console_printf ("This program only operates on an Ethernet link layer pcap_datalink(%s); returned %d\n",
                 interface_name, link_layer);
         exit (EXIT_FAILURE);
     }
@@ -410,7 +439,7 @@ static int64_t get_monotonic_time (void)
     rc = clock_gettime (CLOCK_MONOTONIC, &now);
     if (rc != 0)
     {
-        fprintf (stderr, "clock_getime(CLOCK_MONOTONIC) failed\n");
+        console_printf ("clock_getime(CLOCK_MONOTONIC) failed\n");
         exit (EXIT_FAILURE);
     }
     
@@ -503,13 +532,10 @@ static void write_mac_addr (FILE *const csv_file, const uint8_t *const mac_addr)
 
 /**
  * @brief write a CSV file which contains information about the frames transmitted and received during the test
+ * @param[in] csv_filename Name of the CSV file to create.
  */
-static void write_recorded_frames (void)
+static void write_recorded_frames (const char *const csv_filename)
 {
-    const time_t now = time (NULL);
-    struct tm broken_down_time;
-    char csv_filename[80];
-    
     const char *const frame_type_names[FRAME_RECORD_ARRAY_SIZE] =
     {
         [FRAME_RECORD_TX_TEST_FRAME] = "Tx test",
@@ -517,12 +543,8 @@ static void write_recorded_frames (void)
         [FRAME_RECORD_RX_OTHER     ] = "Rx other"
     };
     
-    /* Create a CSV filename containing the current date/time */
-    localtime_r (&now, &broken_down_time);
-    strftime (csv_filename, sizeof (csv_filename), "frames_%Y%m%dT%H%M%S.csv", &broken_down_time);
-    printf ("Saving frame results to %s\n", csv_filename);
-    
     /* Create CSV file and write headers */
+    console_printf ("Saving frame results to %s\n", csv_filename);
     FILE *csv_file = fopen (csv_filename, "w");
     if (csv_file == NULL)
     {
@@ -589,7 +611,7 @@ static uint32_t find_port_index_from_mac_addr (const uint8_t *const mac_addr)
     
     if (!found_port_index)
     {
-        fprintf (stderr, "Failed to find port_index for MAC address\n");
+        console_printf ("Failed to find port_index for MAC address\n");
         exit (EXIT_FAILURE);
     }
     
@@ -663,25 +685,25 @@ static void summarise_frame_loopback (const const uint32_t test_duration_src_des
     int source_port_index;
     int destination_port_index;
     const int field_width = 6;
-    printf ("\nTest sent %" PRIu32 " frames for each combination of source and destination ports\n",
+    console_printf ("\nTest sent %" PRIu32 " frames for each combination of source and destination ports\n",
             test_duration_src_dest_combinations);
-    printf ("Count of correctly received frames:\n");
-    printf ("%*s  destination ports --->\n", field_width, "source");
-    printf ("%*s", -field_width, "port");
+    console_printf ("Count of correctly received frames:\n");
+    console_printf ("%*s  destination ports --->\n", field_width, "source");
+    console_printf ("%*s", -field_width, "port");
     for (destination_port_index = 0; destination_port_index < NUM_TEST_PORTS; destination_port_index++)
     {
-        printf ("  %*" PRIu32, field_width,destination_port_index);
+        console_printf ("  %*" PRIu32, field_width, test_ports[destination_port_index].switch_port_number);
     }
-    printf ("\n");
+    console_printf ("\n");
     for (source_port_index = 0; source_port_index < NUM_TEST_PORTS; source_port_index++)
     {
-        printf ("%*" PRIu32, field_width, source_port_index);
+        console_printf ("%*" PRIu32, field_width, test_ports[source_port_index].switch_port_number);
         for (destination_port_index = 0; destination_port_index < NUM_TEST_PORTS; destination_port_index++)
         {
             if (destination_port_index != source_port_index)
             {
                 const uint32_t frame_count = num_expected_received_frames[source_port_index][destination_port_index];
-                printf ("  %*" PRIu32, field_width, frame_count);
+                console_printf ("  %*" PRIu32, field_width, frame_count);
                 if (frame_count != test_duration_src_dest_combinations)
                 {
                     test_fail = true;
@@ -689,12 +711,12 @@ static void summarise_frame_loopback (const const uint32_t test_duration_src_des
             }
             else
             {
-                printf ("  %*s", field_width, "");
+                console_printf ("  %*s", field_width, "");
             }
         }
-        printf ("\n");
+        console_printf ("\n");
     }
-    printf ("\nTest: %s\n", test_fail ? "FAIL" : "PASS");
+    console_printf ("\nTest: %s\n", test_fail ? "FAIL" : "PASS");
 }
 
 
@@ -707,12 +729,33 @@ int main (int argc, char *argv[])
         exit (EXIT_FAILURE);
     }
     
+    /* When an interface name is provided on the command line then use that, otherwise ask the user */
+    const char *const interface_name = (argc > 1) ? argv[1] : select_interface ();
+    
     /* Allocate space to record test frames */
     frame_records = calloc (MAX_FRAME_RECORDS, sizeof (frame_records[0]));
     num_frame_records = 0;
+
+    /* Set filenames which contain the output files containing the date/time and OS used */
+    const time_t tod_now = time (NULL);
+    struct tm broken_down_time;
+#ifdef _WIN32
+    #define OS_NAME "windows"
+#else
+    #define OS_NAME "linux"
+#endif
+    char csv_filename[80];
+    char console_filename[80];
+    localtime_r (&tod_now, &broken_down_time);
+    strftime (csv_filename, sizeof (csv_filename), "%Y%m%dT%H%M%S_frames_" OS_NAME ".csv", &broken_down_time);
+    strftime (console_filename, sizeof (console_filename), "%Y%m%dT%H%M%S_console_" OS_NAME ".txt", &broken_down_time);
     
-    /* When an interface name is provided on the command line then use that, otherwise ask the user */
-    const char *const interface_name = (argc > 1) ? argv[1] : select_interface ();
+    console_file = fopen (console_filename, "wt");
+    if (console_file == NULL)
+    {
+        fprintf (stderr, "Failed to create %s\n", console_filename);
+        exit (EXIT_FAILURE);
+    }
     
     pcap_t *const pcap_handle = open_interface (interface_name);
 
@@ -751,7 +794,7 @@ int main (int argc, char *argv[])
             rc = pcap_sendpacket (pcap_handle, (const u_char *) &tx_frame, sizeof (tx_frame));
             if (rc != 0)
             {
-                fprintf(stderr,"\nError sending the packet: %s\n", pcap_geterr(pcap_handle));
+                console_printf ("\nError sending the packet: %s\n", pcap_geterr(pcap_handle));
                 exit (EXIT_FAILURE);
             }
             record_test_frame (NULL, &tx_frame, start_time);
@@ -780,7 +823,7 @@ int main (int argc, char *argv[])
             rc = pcap_next_ex (pcap_handle, &pkt_header, &pkt_data);
             if (rc == PCAP_ERROR)
             {
-                fprintf(stderr,"\nError receiving packet: %s\n", pcap_geterr(pcap_handle));
+                console_printf ("\nError receiving packet: %s\n", pcap_geterr(pcap_handle));
                 exit (EXIT_FAILURE);
             }
             else if (rc == 1)
@@ -802,20 +845,22 @@ int main (int argc, char *argv[])
     rc = pcap_stats (pcap_handle, &statistics);
     if (rc == PCAP_ERROR)
     {
-        fprintf(stderr,"\npcap_stats() failed: %s\n", pcap_geterr(pcap_handle));
+        console_printf ("\npcap_stats() failed: %s\n", pcap_geterr(pcap_handle));
         exit (EXIT_FAILURE);
     }
 
     pcap_close (pcap_handle);
 
-    write_recorded_frames ();
-    printf ("Elapsed time %.6f\n", (now - start_time) / 1E9);
-    printf ("ps_recv=%u ps_drop=%u ps_ifdrop=%u\n", statistics.ps_recv, statistics.ps_drop, statistics.ps_ifdrop);
-    printf ("num_tx_test_frames=%" PRIu64 " num_rx_test_frames=%" PRIu64 " num_other_rx_frames=%" PRIu64 "\n",
+    write_recorded_frames (csv_filename);
+    console_printf ("Elapsed time %.6f\n", (now - start_time) / 1E9);
+    console_printf ("ps_recv=%u ps_drop=%u ps_ifdrop=%u\n", statistics.ps_recv, statistics.ps_drop, statistics.ps_ifdrop);
+    console_printf ("num_tx_test_frames=%" PRIu64 " num_rx_test_frames=%" PRIu64 " num_other_rx_frames=%" PRIu64 "\n",
             frame_counts[FRAME_RECORD_TX_TEST_FRAME],
             frame_counts[FRAME_RECORD_RX_TEST_FRAME],
             frame_counts[FRAME_RECORD_RX_OTHER]);
     summarise_frame_loopback (test_duration_src_dest_combinations);
+    
+    fclose (console_file);
     
     return EXIT_SUCCESS;
 }
