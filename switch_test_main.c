@@ -791,7 +791,7 @@ int main (int argc, char *argv[])
     
     /* Report the command line arguments used */
     console_printf ("Using interface %s (%s)\n", interface_name, interface_description);
-    console_printf ("frame rate = %d Hz\n", frame_rate_hz);
+    console_printf ("requested frame rate = %d Hz\n", frame_rate_hz);
     
     pcap_t *const pcap_handle = open_interface (interface_name);
 
@@ -814,15 +814,33 @@ int main (int argc, char *argv[])
     const uint32_t test_duration_src_dest_combinations = 100;
     uint32_t num_src_dest_combinations = 0;
     
+    uint32_t num_tx_frames = 0;
+    double actual_frame_rate = 0.0;
+    
     /* Run test for a fixed number of transmitted frames, sending frames at a fixed rate and recording which are received.
        This uses a busy-polling loop to determine when is time for the next transmit frame, or to poll for
-       received frames. */
+       received frames. 
+     
+       It give preference to polling for received packets, to try and avoid getting behind in reception. */
     bool test_complete = false;
     while (!test_complete)
     {
         now = get_monotonic_time ();
+
+        /* Poll for receipt of packet */
+        rc = pcap_next_ex (pcap_handle, &pkt_header, &pkt_data);
+        if (rc == PCAP_ERROR)
+        {
+            console_printf ("\nError receiving packet: %s\n", pcap_geterr(pcap_handle));
+            exit (EXIT_FAILURE);
+        }
         
-        if ((now >= next_frame_send_time) && (num_src_dest_combinations < test_duration_src_dest_combinations))
+        if (rc == 1)
+        {
+            /* Process received packet */
+            record_test_frame (pkt_header, (const ethercat_frame_t *) pkt_data, start_time);
+        }
+        else if ((now >= next_frame_send_time) && (num_src_dest_combinations < test_duration_src_dest_combinations))
         {
             /* Send the next frame, cycling around combinations of the source and destination ports */
             const uint32_t source_port_index = (destination_port_index + source_port_offset) % NUM_TEST_PORTS;
@@ -835,6 +853,7 @@ int main (int argc, char *argv[])
             }
             record_test_frame (NULL, &tx_frame, start_time);
             next_frame_send_time += send_interval;
+            num_tx_frames++;
             
             destination_port_index = (destination_port_index + 1) % NUM_TEST_PORTS;
             if (destination_port_index == 0)
@@ -849,30 +868,16 @@ int main (int argc, char *argv[])
                         /* After have transmitted all the sequence of test frame, wait for 100ms to check for receipt */
                         const int64_t wait_for_final_receipt_delay = 100000000;
                         stop_time = now + wait_for_final_receipt_delay;
+                        actual_frame_rate = (double) num_tx_frames / ((double) (now - start_time) / 1E9);
                     }
                 }
             }
         }
-        else
-        {
-            /* Poll for receipt of packet */
-            rc = pcap_next_ex (pcap_handle, &pkt_header, &pkt_data);
-            if (rc == PCAP_ERROR)
-            {
-                console_printf ("\nError receiving packet: %s\n", pcap_geterr(pcap_handle));
-                exit (EXIT_FAILURE);
-            }
-            else if (rc == 1)
-            {
-                /* Packet received */
-                record_test_frame (pkt_header, (const ethercat_frame_t *) pkt_data, start_time);
-            }
             
-            if ((num_src_dest_combinations == test_duration_src_dest_combinations) &&
+        if ((num_src_dest_combinations == test_duration_src_dest_combinations) &&
                 (now >= stop_time))
-            {
-                test_complete = true;
-            }
+        {
+            test_complete = true;
         }
     }
     now = get_monotonic_time ();
@@ -889,6 +894,7 @@ int main (int argc, char *argv[])
 
     write_recorded_frames (csv_filename);
     console_printf ("Elapsed time %.6f\n", (now - start_time) / 1E9);
+    console_printf ("Actual frame rate = %.1f Hz\n", actual_frame_rate);
     console_printf ("ps_recv=%u ps_drop=%u ps_ifdrop=%u\n", statistics.ps_recv, statistics.ps_drop, statistics.ps_ifdrop);
     console_printf ("num_tx_test_frames=%" PRIu64 " num_rx_test_frames=%" PRIu64 " num_other_rx_frames=%" PRIu64 "\n",
             frame_counts[FRAME_RECORD_TX_TEST_FRAME],
