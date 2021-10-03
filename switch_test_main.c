@@ -200,19 +200,16 @@ static void console_printf (const char *const format, ...)
 
 
 /**
- * @brief Select which network interface to use for the switch test.
- * @details Gets the list of interfaces from NPCAP and prompts the user.
- * @return Returns the name of the network interface to open.
+ * @brief Display the available PCAP interfaces
+ * @details The interface names can be passed on the command line to specify which interface on the PC to use to for the tests.
+ *          The description of the interfaces are given, since under Windows the interfaces names are UUID strings.      
  */
-static const char *select_interface (void)
+static void display_available_interfaces (void)
 {
-    const char *selected_interface_name = NULL;
     pcap_if_t *alldevs;
     pcap_if_t *dev;
     char errbuf[PCAP_ERRBUF_SIZE];
     int rc;
-    int dev_num;
-    int selected_dev_num;
     
     rc = pcap_findalldevs (&alldevs, errbuf);
     if (rc != 0)
@@ -220,12 +217,11 @@ static const char *select_interface (void)
         fprintf (stderr,"Error in pcap_findalldevs(): %s\n", errbuf);
         exit (EXIT_FAILURE);
     }
-    
-    /* Print the list */
-    dev_num = 0;
+
+    printf ("Available network interfaces: name (description)\n");
     for (dev = alldevs; dev != NULL; dev = dev->next)
     {
-        printf ("%d. %s", ++dev_num, dev->name);
+        printf ("%s", dev->name);
         if (dev->description != NULL)
         {
             printf (" (%s)\n", dev->description);
@@ -235,31 +231,49 @@ static const char *select_interface (void)
             printf (" (No description available)\n");
         }
     }
+
+    pcap_freealldevs (alldevs);
+}
+
+
+/**
+ * @brief Get the description for an interface name.
+ * @param[in] interface_name The PCAP interface name to get the description for
+ * @return Returns the description for the interface name, or NULL if the interface name isn't found
+ */
+static const char *get_interface_description (const char *const interface_name)
+{
+    const char *interface_description = NULL;
+    pcap_if_t *alldevs;
+    pcap_if_t *dev;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    int rc;
     
-    /* Prompt for which interface to use */
-    printf ("Enter the interface number (1-%d):", dev_num);
-    scanf ( "%d", &selected_dev_num);
-    if ((selected_dev_num < 1) || (selected_dev_num > dev_num))
+    rc = pcap_findalldevs (&alldevs, errbuf);
+    if (rc != 0)
     {
-        printf ("\nInterface number out of range.\n");
-        pcap_freealldevs (alldevs);
+        fprintf (stderr,"Error in pcap_findalldevs(): %s\n", errbuf);
         exit (EXIT_FAILURE);
     }
-
-    /* Take a copy of the selected interface name to return */
-    dev_num = 0;
+    
     for (dev = alldevs; dev != NULL; dev = dev->next)
     {
-        dev_num++;
-        if (dev_num == selected_dev_num)
+        if (strcmp (dev->name, interface_name) == 0)
         {
-            selected_interface_name = strdup (dev->name);
+            if (dev->description != NULL)
+            {
+                interface_description = strdup (dev->description);
+            }
+            else
+            {
+                interface_description = "No description available";
+            }
         }
     }
 
     pcap_freealldevs (alldevs);
     
-    return selected_interface_name;
+    return interface_description;
 }
 
 
@@ -729,14 +743,29 @@ int main (int argc, char *argv[])
         exit (EXIT_FAILURE);
     }
     
-    /* When an interface name is provided on the command line then use that, otherwise ask the user */
-    const char *const interface_name = (argc > 1) ? argv[1] : select_interface ();
+    /* Process command line arguments */
+    if (argc < 3)
+    {
+        printf ("Usage: %s <interface_name> <frame_rate_hz>\n\n", argv[0]);
+        display_available_interfaces ();
+        exit (EXIT_FAILURE);
+    }
+    
+    const char *const interface_name = argv[1];
+    const int frame_rate_hz = atoi (argv[2]);
+    const char *const interface_description = get_interface_description (interface_name);
+    
+    if (interface_description == NULL)
+    {
+        fprintf (stderr, "Interface name %s not found\n", interface_name);
+        exit (EXIT_FAILURE);
+    }
     
     /* Allocate space to record test frames */
     frame_records = calloc (MAX_FRAME_RECORDS, sizeof (frame_records[0]));
     num_frame_records = 0;
 
-    /* Set filenames which contain the output files containing the date/time and OS used */
+    /* Set filenames which contain the output files containing the date/time, OS used and frame rate */
     const time_t tod_now = time (NULL);
     struct tm broken_down_time;
 #ifdef _WIN32
@@ -744,11 +773,14 @@ int main (int argc, char *argv[])
 #else
     #define OS_NAME "linux"
 #endif
+    char date_time_str[80];
     char csv_filename[80];
     char console_filename[80];
+    
     localtime_r (&tod_now, &broken_down_time);
-    strftime (csv_filename, sizeof (csv_filename), "%Y%m%dT%H%M%S_frames_" OS_NAME ".csv", &broken_down_time);
-    strftime (console_filename, sizeof (console_filename), "%Y%m%dT%H%M%S_console_" OS_NAME ".txt", &broken_down_time);
+    strftime (date_time_str, sizeof (date_time_str), "%Y%m%dT%H%M%S", &broken_down_time);
+    snprintf (csv_filename, sizeof (csv_filename), "%s_frames_%s_%dhz.csv", date_time_str, OS_NAME, frame_rate_hz);
+    snprintf (console_filename, sizeof (console_filename), "%s_console_%s_%dhz.txt", date_time_str, OS_NAME, frame_rate_hz);
     
     console_file = fopen (console_filename, "wt");
     if (console_file == NULL)
@@ -756,6 +788,10 @@ int main (int argc, char *argv[])
         fprintf (stderr, "Failed to create %s\n", console_filename);
         exit (EXIT_FAILURE);
     }
+    
+    /* Report the command line arguments used */
+    console_printf ("Using interface %s (%s)\n", interface_name, interface_description);
+    console_printf ("frame rate = %d Hz\n", frame_rate_hz);
     
     pcap_t *const pcap_handle = open_interface (interface_name);
 
@@ -768,8 +804,8 @@ int main (int argc, char *argv[])
     int64_t now;
     int rc;
     
-    /* Set to transmit one frame a rate of every 1 ms */
-    const int64_t send_interval = 1000000;
+    /* Set to transmit one frame a rate given by the command line argument */
+    const int64_t send_interval = (int64_t) (1E9 / (double) frame_rate_hz);
     int64_t next_frame_send_time = start_time;
     
     uint32_t destination_port_index = 0;
