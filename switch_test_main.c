@@ -16,6 +16,8 @@
 #include <arpa/inet.h>
 #endif
 
+#include <pthread.h>
+#include <semaphore.h>
 #include <pcap.h>
 
 
@@ -169,6 +171,7 @@ static uint64_t frame_counts[FRAME_RECORD_ARRAY_SIZE];
 #define MAX_FRAME_RECORDS 1000000
 static frame_record_t *frame_records;
 static uint32_t num_frame_records;
+static sem_t frame_records_sem;
 
 
 /* Next transmit sequence number inserted in the Address of the EtherCAT frame */
@@ -177,6 +180,16 @@ static uint32_t next_transmit_sequence_number;
 
 /* File used to store a copy of the output written to the console */
 static FILE *console_file;
+
+
+/* The context used for the receive thread */
+typedef struct
+{
+    /* Used to receive from PCAP */
+    pcap_t *pcap_rx_handle;
+    /* The monotonic start time for the test */
+    int64_t start_time;
+} receive_thread_context_t;
 
 
 /*
@@ -463,6 +476,10 @@ static int64_t get_monotonic_time (void)
 
 /*
  * @brief Record information about an Ethernet frame transmitted or received during a test
+ * @details This uses a sempahore to protect the global frame_records[] against access by the main transmit thread and
+ *          receive thread. To ensure receive frames are only stored after the transmit frame, 
+ *          required by summarise_frame_loopback() to report a pass, means this function must be called by the trasnmit thread
+ *          prior to actually transmitting the packet.
  * @param[in] pkt_header When non-null the received packet header.
  *                       When NULL indicates are being called to record a transmitted test frame
  * @param[in] frame The frame to record information for
@@ -473,6 +490,7 @@ static void record_test_frame (const struct pcap_pkthdr *const pkt_header, const
 {
     frame_record_type_t frame_type;
     bpf_u_int32 len;
+    int rc;
     
     const uint16_t ether_type = ntohs (frame->ether_type);
     const uint16_t vlan_ether_type = ntohs (frame->vlan_ether_type);
@@ -494,6 +512,13 @@ static void record_test_frame (const struct pcap_pkthdr *const pkt_header, const
     {
         frame_type = FRAME_RECORD_TX_TEST_FRAME;
         len = sizeof (ethercat_frame_t);
+    }
+    
+    rc = sem_wait (&frame_records_sem);
+    if (rc != 0)
+    {
+        console_printf ("sem_wait() failed rc=%d\n", rc);
+        exit (EXIT_FAILURE);
     }
     
     /* Store the frame summary if space */
@@ -527,6 +552,13 @@ static void record_test_frame (const struct pcap_pkthdr *const pkt_header, const
     
     /* Maintain the frame counts */
     frame_counts[frame_type]++;
+    
+    rc = sem_post (&frame_records_sem);
+    if (rc != 0)
+    {
+        console_printf ("sem_wait() failed rc=%d\n", rc);
+        exit (EXIT_FAILURE);
+    }
 }
 
 
@@ -734,6 +766,42 @@ static void summarise_frame_loopback (const const uint32_t test_duration_src_des
 }
 
 
+/**
+ * @brief The receive thread which just polls for frames, and stores information about them
+ * @param[in] arg The receive thread context
+ * @return Not used.
+ */
+static void *receive_thread (void *arg)
+{
+    receive_thread_context_t *const context = arg;
+    bool exit_requested = false;
+    struct pcap_pkthdr *pkt_header = NULL;
+    const u_char *pkt_data = NULL;
+    int rc;
+    
+    while (!exit_requested)
+    {
+        /* Poll for receipt of packet */
+        rc = pcap_next_ex (context->pcap_rx_handle, &pkt_header, &pkt_data);
+        if (rc == PCAP_ERROR)
+        {
+            console_printf ("\nError receiving packet: %s\n", pcap_geterr(context->pcap_rx_handle));
+            exit (EXIT_FAILURE);
+        }
+        else if (rc == PCAP_ERROR_BREAK)
+        {
+            exit_requested = true;
+        }
+        else if (rc == 1)
+        {
+            /* Process received packet */
+            record_test_frame (pkt_header, (const ethercat_frame_t *) pkt_data, context->start_time);
+        }
+    }
+    return NULL;
+}
+
+
 int main (int argc, char *argv[])
 {
     /* Check that ethercat_frame_t has the expected size */
@@ -793,20 +861,39 @@ int main (int argc, char *argv[])
     console_printf ("Using interface %s (%s)\n", interface_name, interface_description);
     console_printf ("requested frame rate = %d Hz\n", frame_rate_hz);
     
-    pcap_t *const pcap_handle = open_interface (interface_name);
+    pcap_t *const pcap_tx_handle = open_interface (interface_name);
+    pcap_t *const pcap_rx_handle = open_interface (interface_name);
 
     ethercat_frame_t tx_frame;
-    struct pcap_pkthdr *pkt_header = NULL;
-    const u_char *pkt_data = NULL;
+    
+    /* Start the receive thread */
+    int rc;
+    pthread_t rx_thread_handle;
+    receive_thread_context_t rx_thread_context =
+    {
+        .pcap_rx_handle = pcap_rx_handle
+    };
+    rc = sem_init (&frame_records_sem, 0, 1);
+    if (rc != 0)
+    {
+        console_printf ("sem_init() failed rc=%d\n", rc);
+        exit (EXIT_FAILURE);
+    }
+    rc = pthread_create (&rx_thread_handle, NULL, receive_thread, &rx_thread_context);
+    if (rc != 0)
+    {
+        console_printf ("pthread_create() failed rc=%d\n", rc);
+        exit (EXIT_FAILURE);
+    }
     
     const int64_t start_time = get_monotonic_time ();
     int64_t stop_time = 0;
     int64_t now;
-    int rc;
     
     /* Set to transmit one frame a rate given by the command line argument */
     const int64_t send_interval = (int64_t) (1E9 / (double) frame_rate_hz);
     int64_t next_frame_send_time = start_time;
+    rx_thread_context.start_time = start_time;
     
     uint32_t destination_port_index = 0;
     uint32_t source_port_offset = 1;
@@ -818,40 +905,24 @@ int main (int argc, char *argv[])
     double actual_frame_rate = 0.0;
     
     /* Run test for a fixed number of transmitted frames, sending frames at a fixed rate and recording which are received.
-       This uses a busy-polling loop to determine when is time for the next transmit frame, or to poll for
-       received frames. 
-     
-       It give preference to polling for received packets, to try and avoid getting behind in reception. */
+       This uses a busy-polling loop to determine when is time for the next transmit frame. */
     bool test_complete = false;
     while (!test_complete)
     {
         now = get_monotonic_time ();
 
-        /* Poll for receipt of packet */
-        rc = pcap_next_ex (pcap_handle, &pkt_header, &pkt_data);
-        if (rc == PCAP_ERROR)
-        {
-            console_printf ("\nError receiving packet: %s\n", pcap_geterr(pcap_handle));
-            exit (EXIT_FAILURE);
-        }
-        
-        if (rc == 1)
-        {
-            /* Process received packet */
-            record_test_frame (pkt_header, (const ethercat_frame_t *) pkt_data, start_time);
-        }
-        else if ((now >= next_frame_send_time) && (num_src_dest_combinations < test_duration_src_dest_combinations))
+        if ((now >= next_frame_send_time) && (num_src_dest_combinations < test_duration_src_dest_combinations))
         {
             /* Send the next frame, cycling around combinations of the source and destination ports */
             const uint32_t source_port_index = (destination_port_index + source_port_offset) % NUM_TEST_PORTS;
             create_test_frame (&tx_frame, source_port_index, destination_port_index);
-            rc = pcap_sendpacket (pcap_handle, (const u_char *) &tx_frame, sizeof (tx_frame));
+            record_test_frame (NULL, &tx_frame, start_time);
+            rc = pcap_sendpacket (pcap_tx_handle, (const u_char *) &tx_frame, sizeof (tx_frame));
             if (rc != 0)
             {
-                console_printf ("\nError sending the packet: %s\n", pcap_geterr(pcap_handle));
+                console_printf ("\nError sending the packet: %s\n", pcap_geterr(pcap_tx_handle));
                 exit (EXIT_FAILURE);
             }
-            record_test_frame (NULL, &tx_frame, start_time);
             next_frame_send_time += send_interval;
             num_tx_frames++;
             
@@ -882,15 +953,26 @@ int main (int argc, char *argv[])
     }
     now = get_monotonic_time ();
     
+    /* Request the receive thread exit, and wait until has exited */
+    pcap_breakloop (pcap_rx_handle);
+    
+    rc = pthread_join (rx_thread_handle, NULL);
+    if (rc != 0)
+    {
+        console_printf ("pthread_join() failed rc=%d\n", rc);
+        exit (EXIT_FAILURE);
+    }
+    
     struct pcap_stat statistics;
-    rc = pcap_stats (pcap_handle, &statistics);
+    rc = pcap_stats (pcap_rx_handle, &statistics);
     if (rc == PCAP_ERROR)
     {
-        console_printf ("\npcap_stats() failed: %s\n", pcap_geterr(pcap_handle));
+        console_printf ("\npcap_stats() failed: %s\n", pcap_geterr(pcap_rx_handle));
         exit (EXIT_FAILURE);
     }
 
-    pcap_close (pcap_handle);
+    pcap_close (pcap_tx_handle);
+    pcap_close (pcap_rx_handle);
 
     write_recorded_frames (csv_filename);
     console_printf ("Elapsed time %.6f\n", (now - start_time) / 1E9);
