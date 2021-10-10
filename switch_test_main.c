@@ -22,8 +22,11 @@
 
 
 #ifdef _WIN32
+/* Under Windows use the pcap_sendqueue_transmit() function to send multiple frames in one go to increase the send rate. 
+   The SEND_QUEUE_LEN_FRAMES value of 200 was derived experimentally as the highest value which allows the receive thread
+   to keep up and not report a test FAIL due to missing frames. */
 #define ENABLE_SEND_QUEUE
-#define SEND_QUEUE_LEN_FRAMES 20
+#define SEND_QUEUE_LEN_FRAMES 200
 #endif
 
 
@@ -331,7 +334,8 @@ static pcap_t *open_interface (const char *const interface_name)
         console_printf ("Error in pcap_set_snaplen(): %s\n", pcap_statustostr (rc));
         exit (EXIT_FAILURE);
     }
-    
+   
+#ifdef ENABLE_RECEIVE_BUFFERING
     /* Enable buffering of packets to try and minimise overheads of receive thread */
     const int disable_immediate_mode = 0;
     rc = pcap_set_immediate_mode (pcap_handle, disable_immediate_mode);
@@ -350,6 +354,27 @@ static pcap_t *open_interface (const char *const interface_name)
         console_printf ("Error in pcap_set_timeout(): %s\n", pcap_statustostr (rc));
         exit (EXIT_FAILURE);
     }
+#else
+    /* Enable immediate receive mode as use polling to alternate between sending at a specified rate and
+     * checking for the receipt of the test packets. */
+    const int immediate_mode = 1;
+    rc = pcap_set_immediate_mode (pcap_handle, immediate_mode);
+    if (rc != 0)
+    {
+        console_printf ("Error in pcap_set_immediate_mode(): %s\n", pcap_statustostr (rc));
+        exit (EXIT_FAILURE);
+    }
+    
+    /* Disable the timeout to allow pcap_next_ex() to poll for packets.
+       From the documentation this might not be supported on all systems, but has worked on Windows 10 and a Linux 3.10 Kernel. */
+    const int no_timeout = -1;
+    rc = pcap_set_timeout (pcap_handle, no_timeout);
+    if (rc != 0)
+    {
+        console_printf ("Error in pcap_set_timeout(): %s\n", pcap_statustostr (rc));
+        exit (EXIT_FAILURE);
+    }
+#endif
     
     /* Activate the interface for use */
     rc = pcap_activate (pcap_handle);
