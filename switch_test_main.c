@@ -21,6 +21,12 @@
 #include <pcap.h>
 
 
+#ifdef _WIN32
+#define ENABLE_SEND_QUEUE
+#define SEND_QUEUE_LEN_FRAMES 20
+#endif
+
+
 #define NSECS_PER_SEC 1000000000LL
 
 /* Ethernet frame types */
@@ -860,6 +866,18 @@ int main (int argc, char *argv[])
     console_printf ("Using interface %s (%s)\n", interface_name, interface_description);
     console_printf ("requested frame rate = %d Hz\n", frame_rate_hz);
     
+#ifdef ENABLE_SEND_QUEUE
+    struct pcap_pkthdr send_pkt_header = {0};
+    uint32_t num_frames_queued = 0;
+    pcap_send_queue *const send_queue =
+            pcap_sendqueue_alloc (SEND_QUEUE_LEN_FRAMES * (sizeof (struct pcap_pkthdr) + sizeof(ethercat_frame_t)));
+    if (send_queue == NULL)
+    {
+        console_printf ("pcap_sendqueue_alloc() failed\n");
+        exit (EXIT_FAILURE);
+    }
+#endif
+    
     pcap_t *const pcap_tx_handle = open_interface (interface_name);
     pcap_t *const pcap_rx_handle = open_interface (interface_name);
 
@@ -916,12 +934,36 @@ int main (int argc, char *argv[])
             const uint32_t source_port_index = (destination_port_index + source_port_offset) % NUM_TEST_PORTS;
             create_test_frame (&tx_frame, source_port_index, destination_port_index);
             record_test_frame (NULL, &tx_frame, start_time);
+#ifdef ENABLE_SEND_QUEUE
+            send_pkt_header.caplen = sizeof (tx_frame);
+            rc = pcap_sendqueue_queue (send_queue, &send_pkt_header, (const u_char *) &tx_frame);
+            if (rc != 0)
+            {
+                console_printf ("pcap_sendqueue_queue() failed\n");
+                exit (EXIT_FAILURE);
+            }
+            num_frames_queued++;
+            if (num_frames_queued == SEND_QUEUE_LEN_FRAMES)
+            {
+                u_int bytes_sent = pcap_sendqueue_transmit (pcap_tx_handle, send_queue, 0);
+                if (bytes_sent != send_queue->len)
+                {
+                console_printf ("pcacp_sendqueue_transmit() sent %u out of %u bytes\n",
+                        bytes_sent, send_queue->len);
+                exit (EXIT_FAILURE);
+                }
+                send_queue->len = 0;
+                num_frames_queued = 0;
+            }
+#else
+            /* Send a single frame */
             rc = pcap_sendpacket (pcap_tx_handle, (const u_char *) &tx_frame, sizeof (tx_frame));
             if (rc != 0)
             {
                 console_printf ("\nError sending the packet: %s\n", pcap_geterr(pcap_tx_handle));
                 exit (EXIT_FAILURE);
             }
+#endif
             next_frame_send_time += send_interval;
             num_tx_frames++;
             
@@ -974,6 +1016,9 @@ int main (int argc, char *argv[])
 
     pcap_close (pcap_tx_handle);
     pcap_close (pcap_rx_handle);
+#ifdef ENABLE_SEND_QUEUE
+    pcap_sendqueue_destroy (send_queue);
+#endif
 
     write_recorded_frames (csv_filename);
     console_printf ("Elapsed time %.6f\n", (now - start_time) / 1E9);
