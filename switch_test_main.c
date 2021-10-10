@@ -326,20 +326,19 @@ static pcap_t *open_interface (const char *const interface_name)
         exit (EXIT_FAILURE);
     }
     
-    /* Enable immediate receive mode as use polling to alternate between sending at a specified rate and
-     * checking for the receipt of the test packets. */
-    const int immediate_mode = 1;
-    rc = pcap_set_immediate_mode (pcap_handle, immediate_mode);
+    /* Enable buffering of packets to try and minimise overheads of receive thread */
+    const int disable_immediate_mode = 0;
+    rc = pcap_set_immediate_mode (pcap_handle, disable_immediate_mode);
     if (rc != 0)
     {
         console_printf ("Error in pcap_set_immediate_mode(): %s\n", pcap_statustostr (rc));
         exit (EXIT_FAILURE);
     }
     
-    /* Disable the timeout to allow pcap_next_ex() to poll for packets.
-       From the documentation this might not be supported on all systems, but has worked on Windows 10 and a Linux 3.10 Kernel. */
-    const int no_timeout = -1;
-    rc = pcap_set_timeout (pcap_handle, no_timeout);
+    /* Enable a timeout so that the receive thread returns from the pcap_next_ex() call at regular intervals to be able
+     * to detect the end of the test. */
+    const int timeout_ms = 20;
+    rc = pcap_set_timeout (pcap_handle, timeout_ms);
     if (rc != 0)
     {
         console_printf ("Error in pcap_set_timeout(): %s\n", pcap_statustostr (rc));
@@ -936,7 +935,9 @@ int main (int argc, char *argv[])
                     num_src_dest_combinations++;
                     if (num_src_dest_combinations == test_duration_src_dest_combinations)
                     {
-                        /* After have transmitted all the sequence of test frame, wait for 100ms to check for receipt */
+                        /* After have transmitted all the sequence of test frame, wait for 100ms to check for receipt.
+                           This should more than the timeout used for pcap_next_ex() to allow the receive thread to see the final
+                           test frames. */
                         const int64_t wait_for_final_receipt_delay = 100000000;
                         stop_time = now + wait_for_final_receipt_delay;
                         actual_frame_rate = (double) num_tx_frames / ((double) (now - start_time) / 1E9);
