@@ -392,7 +392,11 @@ static pcap_t *open_interface (const char *const interface_name)
     
     /* This has been commented out since with a Intel Corporation 82579V Gigabit Network Connection:
        a. Under Windows 10 failed with PCAP_ERROR.
-       b. Under CentOS 6.10 with a 3.10.33-rt32.33.el6rt.x86_64 Kernel with libpcap 1.4.0 worked.
+       b. Under CentOS 6.10 with a 3.10.33-rt32.33.el6rt.x86_64 Kernel with libpcap 1.4.0:
+          - When pcap_next_ex() is called from the same thread as that which calls pcap_sendpacket() then didn't capture
+            a copy of the transmit frames regardless of if pcap_setdirection() was called.
+          - When pcap_next_ex() is called from a different as that which calls pcap_sendpacket() then captured
+            a copy of the transmit frames regardless of if pcap_setdirection() was called.
     rc = pcap_setdirection (pcap_handle, PCAP_D_IN);
     if (rc != 0)
     {
