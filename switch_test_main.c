@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <time.h>
 #include <stdarg.h>
+#include <getopt.h>
 
 #ifndef _WIN32
 #include <arpa/inet.h>
@@ -54,34 +55,36 @@ typedef struct
 } port_id_t;
 
 
-/** Define a locally administated MAC address and VLAN for each switch port under test */
+/** Define a locally administated MAC address and VLAN for each switch port under test.
+    The last octet of the MAC address is the index into the array, which is used an optimisation when looking
+    up the port number of a received frame (to avoid having to search the table). */
 #define NUM_TEST_PORTS 24
 static port_id_t test_ports[NUM_TEST_PORTS] =
 {
-    { .switch_port_number =  1, .mac_addr = {2,0,1,0,0,1}, .vlan = 1001},
-    { .switch_port_number =  2, .mac_addr = {2,0,1,0,0,2}, .vlan = 1002},
-    { .switch_port_number =  3, .mac_addr = {2,0,1,0,0,3}, .vlan = 1003},
-    { .switch_port_number =  4, .mac_addr = {2,0,1,0,0,4}, .vlan = 1004},
-    { .switch_port_number =  5, .mac_addr = {2,0,1,0,0,5}, .vlan = 1005},
-    { .switch_port_number =  6, .mac_addr = {2,0,1,0,0,6}, .vlan = 1006},
-    { .switch_port_number =  7, .mac_addr = {2,0,1,0,0,7}, .vlan = 1007},
-    { .switch_port_number =  8, .mac_addr = {2,0,1,0,0,8}, .vlan = 1008},
-    { .switch_port_number =  9, .mac_addr = {2,0,1,0,0,9}, .vlan = 1009},
-    { .switch_port_number = 10, .mac_addr = {2,0,1,0,1,0}, .vlan = 1010},
-    { .switch_port_number = 11, .mac_addr = {2,0,1,0,1,1}, .vlan = 1011},
-    { .switch_port_number = 12, .mac_addr = {2,0,1,0,1,2}, .vlan = 1012},
-    { .switch_port_number = 13, .mac_addr = {2,0,1,0,1,3}, .vlan = 1013},
-    { .switch_port_number = 14, .mac_addr = {2,0,1,0,1,4}, .vlan = 1014},
-    { .switch_port_number = 15, .mac_addr = {2,0,1,0,1,5}, .vlan = 1015},
-    { .switch_port_number = 16, .mac_addr = {2,0,1,0,1,6}, .vlan = 1016},
-    { .switch_port_number = 17, .mac_addr = {2,0,1,0,1,7}, .vlan = 1017},
-    { .switch_port_number = 18, .mac_addr = {2,0,1,0,1,8}, .vlan = 1018},
-    { .switch_port_number = 19, .mac_addr = {2,0,1,0,1,9}, .vlan = 1019},
-    { .switch_port_number = 20, .mac_addr = {2,0,1,0,2,0}, .vlan = 1020},
-    { .switch_port_number = 21, .mac_addr = {2,0,1,0,2,1}, .vlan = 1021},
-    { .switch_port_number = 22, .mac_addr = {2,0,1,0,2,2}, .vlan = 1022},
-    { .switch_port_number = 23, .mac_addr = {2,0,1,0,2,3}, .vlan = 1023},
-    { .switch_port_number = 24, .mac_addr = {2,0,1,0,2,4}, .vlan = 1024},
+    { .switch_port_number =  1, .mac_addr = {2,0,1,0,0, 0}, .vlan = 1001},
+    { .switch_port_number =  2, .mac_addr = {2,0,1,0,0, 1}, .vlan = 1002},
+    { .switch_port_number =  3, .mac_addr = {2,0,1,0,0, 2}, .vlan = 1003},
+    { .switch_port_number =  4, .mac_addr = {2,0,1,0,0, 3}, .vlan = 1004},
+    { .switch_port_number =  5, .mac_addr = {2,0,1,0,0, 4}, .vlan = 1005},
+    { .switch_port_number =  6, .mac_addr = {2,0,1,0,0, 5}, .vlan = 1006},
+    { .switch_port_number =  7, .mac_addr = {2,0,1,0,0, 6}, .vlan = 1007},
+    { .switch_port_number =  8, .mac_addr = {2,0,1,0,0, 7}, .vlan = 1008},
+    { .switch_port_number =  9, .mac_addr = {2,0,1,0,0, 8}, .vlan = 1009},
+    { .switch_port_number = 10, .mac_addr = {2,0,1,0,0, 9}, .vlan = 1010},
+    { .switch_port_number = 11, .mac_addr = {2,0,1,0,0,10}, .vlan = 1011},
+    { .switch_port_number = 12, .mac_addr = {2,0,1,0,0,11}, .vlan = 1012},
+    { .switch_port_number = 13, .mac_addr = {2,0,1,0,0,12}, .vlan = 1013},
+    { .switch_port_number = 14, .mac_addr = {2,0,1,0,0,13}, .vlan = 1014},
+    { .switch_port_number = 15, .mac_addr = {2,0,1,0,0,14}, .vlan = 1015},
+    { .switch_port_number = 16, .mac_addr = {2,0,1,0,0,15}, .vlan = 1016},
+    { .switch_port_number = 17, .mac_addr = {2,0,1,0,0,16}, .vlan = 1017},
+    { .switch_port_number = 18, .mac_addr = {2,0,1,0,0,17}, .vlan = 1018},
+    { .switch_port_number = 19, .mac_addr = {2,0,1,0,0,18}, .vlan = 1019},
+    { .switch_port_number = 20, .mac_addr = {2,0,1,0,0,19}, .vlan = 1020},
+    { .switch_port_number = 21, .mac_addr = {2,0,1,0,0,20}, .vlan = 1021},
+    { .switch_port_number = 22, .mac_addr = {2,0,1,0,0,21}, .vlan = 1022},
+    { .switch_port_number = 23, .mac_addr = {2,0,1,0,0,22}, .vlan = 1023},
+    { .switch_port_number = 24, .mac_addr = {2,0,1,0,0,23}, .vlan = 1024},
 };
 
 
@@ -137,16 +140,32 @@ typedef enum
 {
     /* A frame transmitted by the test */
     FRAME_RECORD_TX_TEST_FRAME,
-    /* A frame received by the test, which matches that of the EtherCAT frame transmitted */
+    /* A copy of a transmitted frame which has been received by PCAP.
+     * There can be OS specific differences.
+     * a. Under Linux using the same pcap_t handle for transmit and receive means receive doesn't get a copy
+     *    of the transmitted frames.
+     * b. Whereas under Windows the receive does get a copy of the transmitted frames. */
+    FRAME_RECORD_TX_COPY_FRAME,
+    /* An EtherCAT test frame in the format which is transmitted, and which was received by the test on the
+     * VLAN for the expected destination port. This frame contains an expected pending sequence number. */
     FRAME_RECORD_RX_TEST_FRAME,
-    /* A frame received by the test, which isn't one transmitted */
+    /* As per FRAME_RECORD_RX_TEST_FRAME except the received sequence number was not expected.
+     * This may happen if frames get delayed such that there is no recording of the pending sequence number. */
+    FRAME_RECORD_RX_UNEXPECTED_FRAME,
+    /* An EtherCAT test frame in the format which is transmitted, and which was received by the test on a
+     * VLAN other than that expected for the destination port.
+     * This means the frame was flooded because the switch under test didn't know which port the destination MAC address
+     * was for. */
+    FRAME_RECORD_RX_FLOODED_FRAME,
+    /* A frame received by the test, which isn't one transmitted.
+       I.e. any frames which are not generated by the test program. */
     FRAME_RECORD_RX_OTHER,
     
     FRAME_RECORD_ARRAY_SIZE
 } frame_record_type_t;
 
 
-/* Used to record one frame transmitted or received during the test */
+/* Used to record one frame transmitted or received during the test, for debugging purposes */
 typedef struct
 {
     /* Identifies the type of frame */
@@ -166,9 +185,13 @@ typedef struct
     bool vlan_present;
     /* When vlan_present is true identifies the VLAN this was for */
     uint16_t vlan_id;
-    /* When frame_type is FRAME_RECORD_TX_TEST_FRAME or FRAME_RECORD_RX_TEST_FRAME the sequence number of the frame.
+    /* When frame_type is other than FRAME_RECORD_RX_OTHER the sequence number of the frame.
      * Allows received frames to be matched against the transmitted frame. */
     uint32_t test_sequence_number;
+    /* When frame_type is other than FRAME_RECORD_RX_OTHER the source and destination port numbers of the frame,
+     * based upon matching the source_mac_addr and destination_mac_addr */
+    uint32_t source_port_index;
+    uint32_t destination_port_index;
 } frame_record_t;
 
 
@@ -199,6 +222,108 @@ typedef struct
     /* The monotonic start time for the test */
     int64_t start_time;
 } receive_thread_context_t;
+
+
+/* Command line argument which specifies the name of the PCAP arg_pcap_interface_name used to send/receive test frames */
+static char arg_pcap_interface_name[PATH_MAX];
+
+/* Command line argument which specifies the test interval in seconds, which is the interval over which statistics are
+ * accumulated and then reported. */
+static int64_t arg_test_interval_secs = 10;
+
+
+/* Command line argument which controls how the test runs:
+ * - When false the test runs until requested to stop, and only reports summary information for each test interval.
+ * - When true the test runs for a single test interval, recording the transmitted/received frames in memory which are written 
+ *   to s CSV file at the end of the test interval. */
+static bool arg_frame_debug_enabled = true;
+
+
+/* Used to store pending receive frames for one source / destination port combination.
+ * As frames are transmitted they are stored in, and then removed once received.
+ *
+ * MAX_PENDING_RX_FRAMES is set to a small value as there is one copy of this store for each source / destination port
+ * combination and frames are not expected to queue in the network hardware.
+ *
+ * Missing frames get detected either:
+ * a. If a single frame is missing, the missing frame is detected when the next expected frame has a later sequence number.
+ * b. If multiple frames are missing, a missing frame is detected when the next transmit occurs and the 
+ *    pending_rx_sequence_numbers[] array is full. */
+#define MAX_PENDING_RX_FRAMES 3
+typedef struct
+{
+    /* The number of frames which have been transmitted and are pending for receipt */
+    uint32_t num_pending_rx_frames;
+    /* Index in pending_rx_sequence_numbers[] where a frame is stored after has been transmitted */
+    uint32_t tx_index;
+    /* Index in pending_rx_sequence_numbers[] which contains the next expected receive frame */
+    uint32_t rx_index;
+    /* Circular buffer used to record pending sequence numbers for receive frames */
+    uint32_t pending_rx_sequence_numbers[MAX_PENDING_RX_FRAMES];
+} pending_rx_frames_t;
+
+
+/* Contains the statistics for test frames for one combination of source / destination ports for one test interval */
+typedef struct
+{
+    /* The number of expected receive frames during the test interval */
+    uint32_t num_valid_rx_frames;
+    /* The number of missing receive frames during the test interval */
+    uint32_t num_missing_rx_frames;
+    /* The number of frames transmitted during the test interval */
+    uint32_t num_tx_frames;
+} port_frame_statistics_t;
+
+
+/* Contains the statistics for test frames transmitted and received over one test interval in which the statistics
+ * are accumulated. The transmit and receive counts may not match, if there are frames which are pending being received
+ * at the end of the interval. */
+typedef struct
+{
+    /* The monotonic start and end time of the test interval, to give the duration over which the statistics were accumulated */
+    int64_t interval_start_time;
+    int64_t interval_end_time;
+    /* The counts of different types of frames during the test interval, across all ports tested */
+    uint32_t frame_counts[FRAME_RECORD_ARRAY_SIZE];
+    /* Receive frame counts, indexed by each [source_port][destination_port] combination */
+    port_frame_statistics_t port_frame_statistics[NUM_TEST_PORTS][NUM_TEST_PORTS];
+} frame_test_statistics_t;
+
+
+/* Used to record frames transmitted or received for debug purposes */
+typedef struct
+{
+    /* The allocated length of the frame_records[] array. When zero frames are not recorded */
+    uint32_t allocated_length;
+    /* The number of entries in the frame_records[] array which are currently populated */
+    uint32_t num_frame_records;
+    /* Array used to record frames */
+    frame_record_t *frame_records;
+} frame_records_t;
+
+
+/* The context used for the thread which sends/receive the test frames */
+typedef struct
+{
+    /* Used to send/receive frames using PCAP */
+    pcap_t *pcap_handle;
+    /* The next sexquence number to be transmitted */
+    uint32_t next_tx_sequence_number;
+    /* The next destination ports index to use for a transmitted frame */
+    uint32_t destination_port_index;
+    /* The next modulo offset from destination_port_index to use as the source port index for a transmitted frame */
+    uint32_t source_port_offset;
+    /* Contains the pending receive frames, indexed by [source_port][destination_port] */
+    pending_rx_frames_t pending_rx_frames[NUM_TEST_PORTS][NUM_TEST_PORTS];
+    /* Used to accumulate the statistics for the current test interval */
+    frame_test_statistics_t statistics;
+    /* Monotonic time at which the current test interval ends, which is when the statistics are published and then reset */
+    int64_t test_interval_end_time;
+    /* Optionally used to record frames for debug */
+    frame_records_t frame_recording;
+    /* Used to populate the next frame to be transmitted */
+    ethercat_frame_t tx_frame;
+} frame_tx_rx_thread_context_t;
 
 
 /*
@@ -455,9 +580,11 @@ static pcap_t *open_interface (const char *const interface_name)
  * @param frame[out] The populated frame which can be transmitted.
  * @param source_port_index[in] The index into test_ports[] which selects the source MAC address and outgoing VLAN.
  * @param destination_port_index[in] The index into test_ports[] which selects the destination MAC address.
+ * @param sequence_number[in] The sequence number to place in the transmitted frame
  */
 static void create_test_frame (ethercat_frame_t *const frame, 
-                               const uint32_t source_port_index, const uint32_t destination_port_index)
+                               const uint32_t source_port_index, const uint32_t destination_port_index,
+                               const uint32_t sequence_number)
 {
     memset (frame, 0, sizeof (*frame));
     
@@ -484,8 +611,7 @@ static void create_test_frame (ethercat_frame_t *const frame,
         frame->data[data_index] = fill_value++;
     }
     
-    frame->Address = next_transmit_sequence_number;
-    next_transmit_sequence_number++;
+    frame->Address = sequence_number;
 }
 
 
@@ -672,7 +798,7 @@ static void write_recorded_frames (const char *const csv_filename)
  *            It is assumed this is from a test transmit frame, and so always a MAC address.
  * @return The index into test_ports[] for mac_addr
  */
-static uint32_t find_port_index_from_mac_addr (const uint8_t *const mac_addr)
+static uint32_t find_port_index_from_mac_addr_search (const uint8_t *const mac_addr)
 {
     uint32_t port_index = 0;
     bool found_port_index = false;
@@ -724,8 +850,8 @@ static void summarise_frame_loopback (const const uint32_t test_duration_src_des
         if (frame_records[tx_frame_index].frame_type == FRAME_RECORD_TX_TEST_FRAME)
         {
             const frame_record_t *const tx_frame = &frame_records[tx_frame_index];
-            const uint32_t source_port_index = find_port_index_from_mac_addr (tx_frame->source_mac_addr);
-            const uint32_t destination_port_index = find_port_index_from_mac_addr (tx_frame->destination_mac_addr);
+            const uint32_t source_port_index = find_port_index_from_mac_addr_search (tx_frame->source_mac_addr);
+            const uint32_t destination_port_index = find_port_index_from_mac_addr_search (tx_frame->destination_mac_addr);
             uint32_t rx_frame_index = tx_frame_index + 1;
             bool expected_frame_found = false;
             bool later_frame_found = false;
@@ -832,6 +958,363 @@ static void *receive_thread (void *arg)
             record_test_frame (pkt_header, (const ethercat_frame_t *) pkt_data, context->start_time);
         }
     }
+    return NULL;
+}
+
+
+/*
+ * @brief Reset the statistics which are accumulated over one test interval
+ * @param[in/out] statistics The statistics to reset
+ */
+static void reset_frame_test_statistics (frame_test_statistics_t *const statistics)
+{
+    for (frame_record_type_t frame_type = 0; frame_type < FRAME_RECORD_ARRAY_SIZE; frame_type++)
+    {
+        statistics->frame_counts[frame_type] = 0;
+    }
+    for (uint32_t source_port_index = 0; source_port_index < NUM_TEST_PORTS; source_port_index++)
+    {
+        for (uint32_t destination_port_index = 0; destination_port_index < NUM_TEST_PORTS; destination_port_index++)
+        {
+            port_frame_statistics_t *const port_stats =
+                    &statistics->port_frame_statistics[source_port_index][destination_port_index];
+            
+            port_stats->num_valid_rx_frames = 0;
+            port_stats->num_missing_rx_frames = 0;
+            port_stats->num_tx_frames = 0;
+        }
+    }
+}
+
+
+/**
+ * @brief Initialise the context for the transmit/receive thread, for the start of the test
+ * @param[out] context The initialised context
+ */
+static void transmit_receive_initialise (frame_tx_rx_thread_context_t *const context)
+{
+    context->pcap_handle = open_interface (arg_pcap_interface_name);
+    context->next_tx_sequence_number = 1;
+    context->destination_port_index = 0;
+    context->source_port_offset = 1;
+    for (uint32_t source_port_index = 0; source_port_index < NUM_TEST_PORTS; source_port_index++)
+    {
+        for (uint32_t destination_port_index = 0; destination_port_index < NUM_TEST_PORTS; destination_port_index++)
+        {
+            pending_rx_frames_t *const pending = &context->pending_rx_frames[source_port_index][destination_port_index];
+            
+            pending->num_pending_rx_frames = 0;
+            pending->tx_index = 0;
+            pending->rx_index = 0;
+        }
+    }
+    reset_frame_test_statistics (&context->statistics);
+    
+    if (arg_frame_debug_enabled)
+    {
+        /* Allocate space to record all expected frames within one test duration */
+        const size_t nominal_records_per_test = 3; /* tx frame, copy of tx frame, rx frame */
+        const size_t max_frame_rate = 82000; /* Slightly more than max non-jumbo frames can be sent on a 1 Gb link */
+        context->frame_recording.allocated_length = max_frame_rate * nominal_records_per_test * (uint32_t) arg_test_interval_secs;
+        context->frame_recording.frame_records = calloc 
+                (context->frame_recording.allocated_length, sizeof (context->frame_recording.frame_records[0]));
+    }
+    else
+    {
+        context->frame_recording.allocated_length = 0;
+        context->frame_recording.frame_records = NULL;
+    }
+    context->frame_recording.num_frame_records = 0;
+    
+    const int64_t now = get_monotonic_time ();
+    context->statistics.interval_start_time = now;
+    context->test_interval_end_time = now + (arg_test_interval_secs * NSECS_PER_SEC);
+}
+
+
+/*
+ * @brief Get the port index from a MAC address
+ * @details This assumes that the last octet of the test frame MAC addresses is the index into the test_ports[] array.
+ * @param[in] mac_addr The MAC address in a frame to get the port index for
+ * @param[out] port_index The index obtained from the MAC address
+ * @return Returns true if the MAC address is one used for the test and the port_index has been obtained, or false otherwise.
+ */
+static bool get_port_index_from_mac_addr (const uint8_t *const mac_addr, uint32_t *const port_index)
+{
+    bool port_index_valid;
+    
+    *port_index = mac_addr[5];
+    port_index_valid = (*port_index < NUM_TEST_PORTS);
+    
+    if (port_index_valid)
+    {
+        port_index_valid = memcmp (mac_addr, test_ports[*port_index].mac_addr, ETHER_MAC_ADDRESS_LEN) == 0;
+    }
+    
+    return port_index_valid;
+}
+
+
+/*
+ * @brief When enabled by a command line option, record a transmit/receive frame for debug
+ * @param[in/out] context Context to record the frame in
+ * @param[in] frame_record The frame to record.
+ */
+static void record_frame_for_debug (frame_tx_rx_thread_context_t *const context, const frame_record_t *const frame_record)
+{
+    if (context->frame_recording.num_frame_records < context->frame_recording.allocated_length)
+    {
+        context->frame_recording.frame_records[context->frame_recording.num_frame_records] = *frame_records;
+        context->frame_recording.num_frame_records++;
+    }
+}
+
+
+/*
+ * @brief Identify if an Ethernet frame is one used by the test.
+ * @details If the Ethernet frame is one used by the test also extracts the source/destination port indices
+ *          and the sequence number.
+ * @param[in] context Used to obtain the start time of the test interval, to populate a relative time.
+ * @param[in] pkt_header When non-null the received packet header.
+ *                       When NULL indicates are being called to record a transmitted test frame
+ * @param[in] frame The frame to identify
+ * @param[out] frame_record Contains information for the identified frame.
+ *                          For a receive frame haven't yet performed the checks against the pending receive frames.
+ */
+static void identify_frame (const frame_tx_rx_thread_context_t *const context,
+                            const struct pcap_pkthdr *const pkt_header, const ethercat_frame_t *const frame,
+                            frame_record_t *const frame_record)
+{
+    if (pkt_header != NULL)
+    {
+        /* Use the len from the received frame */
+        frame_record->len = pkt_header->len;
+    }
+    else
+    {
+        /* Set the len for the transmitted frame */
+        frame_record->len = sizeof (ethercat_frame_t);
+    }
+    
+    /* Extract MAC addresses, Ethernet type and VLAN ID from the frame, independent of the test frame format */
+    const uint16_t ether_type = ntohs (frame->ether_type);
+    const uint16_t vlan_ether_type = ntohs (frame->vlan_ether_type);
+
+    frame_record->relative_test_time = get_monotonic_time () - context->statistics.interval_start_time;
+    memcpy (frame_record->destination_mac_addr, frame->destination_mac_addr, sizeof (frame_record->destination_mac_addr));
+    memcpy (frame_record->source_mac_addr, frame->source_mac_addr, sizeof (frame_record->source_mac_addr));
+    frame_record->vlan_present = ether_type == ETH_P_8021Q;
+    if (frame_record->vlan_present)
+    {
+        frame_record->ether_type = vlan_ether_type;
+        frame_record->vlan_id = ntohs (frame->vlan_tci);
+    }
+    else
+    {
+        frame_record->ether_type = ether_type;
+    }
+
+    /* Determine if the frame is one generated by the test program */
+    bool is_test_frame = pkt_header->len >= sizeof (ethercat_frame_t);
+    
+    if (is_test_frame)
+    {
+        is_test_frame = (ether_type == ETH_P_8021Q) && (vlan_ether_type == ETH_P_ETHERCAT) &&
+                get_port_index_from_mac_addr (frame_record->source_mac_addr, &frame_record->source_port_index) &&
+                get_port_index_from_mac_addr (frame_record->destination_mac_addr, &frame_record->destination_port_index);
+    }
+
+    /* Set the initial identified frame type. FRAME_RECORD_RX_TEST_FRAME may be modified following
+     * subsequent checks against the pending receive frames */
+    if (is_test_frame)
+    {
+        frame_record->test_sequence_number = frame->Address;
+        frame_record->frame_type = (pkt_header != NULL) ? FRAME_RECORD_RX_TEST_FRAME : FRAME_RECORD_TX_TEST_FRAME;
+    }
+    else
+    {
+        frame_record->frame_type = FRAME_RECORD_RX_OTHER;
+    }
+}
+
+
+/*
+ * @brief Called when a received frame has been identified as a test frame, to update the list of pending frames
+ * @param[in/out] context Context to update the pending frames for
+ * @param[in/out] frame_record The received frame to compare against the list of pending frames.
+ *                             On output the frame_type has been updated to identify which sub-type of receive frame it is.
+ */
+static void handle_pending_rx_frame (frame_tx_rx_thread_context_t *const context, frame_record_t *const frame_record)
+{
+    pending_rx_frames_t *const pending =
+            &context->pending_rx_frames[frame_record->source_port_index][frame_record->destination_port_index];
+    port_frame_statistics_t *const port_stats = 
+            &context->statistics.port_frame_statistics[frame_record->source_port_index][frame_record->destination_port_index];
+    
+    if (frame_record->vlan_id == test_ports[frame_record->source_port_index].vlan)
+    {
+        /* If the VLAN ID is that of the source port, the PCAP receive has passed a copy of the transmitted frame */
+        frame_record->frame_type = FRAME_RECORD_TX_COPY_FRAME;
+    }
+    else if (frame_record->vlan_id == test_ports[frame_record->destination_port_index].vlan)
+    {
+        /* The frame was received with the VLAN ID for the expected destination port, compare against the pending frames */
+        bool pending_match_found = false;
+        while ((!pending_match_found) && (pending->num_pending_rx_frames > 0))
+        {
+            if (frame_record->test_sequence_number == pending->pending_rx_sequence_numbers[pending->rx_index])
+            {
+                /* This is an expected pending receive frame */
+                port_stats->num_valid_rx_frames++;
+                frame_record->frame_type = FRAME_RECORD_RX_TEST_FRAME;
+                pending_match_found = true;
+            }
+            else
+            {
+                /* The sequence number is not the next expected pending, which means a preceeding frame has been missed */
+                port_stats->num_missing_rx_frames++;
+            }
+            
+            pending->num_pending_rx_frames--;
+            pending->rx_index = (pending->rx_index + 1) % MAX_PENDING_RX_FRAMES;
+        }
+        
+        if (!pending_match_found)
+        {
+            frame_record->frame_type = FRAME_RECORD_RX_UNEXPECTED_FRAME;
+        }
+    }
+    else
+    {
+        /* Must be a frame flooded to a port other than the intended destination */
+        frame_record->frame_type = FRAME_RECORD_RX_FLOODED_FRAME;
+    }
+}
+
+
+/*
+ * @brief Sequence transmitting the next test frame, cycling around combinations of the source and destination ports
+ * @details This also records the frame as pending receipt, identified with the combination of source/destination port
+ *          and sequence nunmber.
+ * @param[in/out] context Context used transmitting frames.
+ */
+static void transmit_next_test_frame (frame_tx_rx_thread_context_t *const context)
+{
+    int rc;
+    const uint32_t source_port_index = (context->destination_port_index + context->source_port_offset) % NUM_TEST_PORTS;
+    pending_rx_frames_t *const pending = &context->pending_rx_frames[source_port_index][context->destination_port_index];
+    port_frame_statistics_t *const port_stats =
+            &context->statistics.port_frame_statistics[source_port_index][context->destination_port_index];
+
+    /* Create the test frame and transmit it */
+    create_test_frame (&context->tx_frame, source_port_index, context->destination_port_index, context->next_tx_sequence_number);
+    rc = pcap_sendpacket (context->pcap_handle, (const u_char *) &context->tx_frame, sizeof (context->tx_frame));
+    if (rc != 0)
+    {
+        console_printf ("\nError sending the packet: %s\n", pcap_geterr(context->pcap_handle));
+        exit (EXIT_FAILURE);
+    }
+
+    /* When debug is enabled identify the transmit frame and record it */
+    if (arg_frame_debug_enabled)
+    {
+        frame_record_t frame_record;
+        
+        identify_frame (context, NULL, &context->tx_frame, &frame_record);
+        record_frame_for_debug (context, &frame_record);
+    }
+
+    /* Update transmit frame counts */
+    context->statistics.frame_counts[FRAME_RECORD_TX_TEST_FRAME]++;
+    port_stats->num_tx_frames++;
+
+    /* If the maximum number of receive frames are pending, then mark the oldest as missing */
+    if (pending->num_pending_rx_frames == MAX_PENDING_RX_FRAMES)
+    {
+        port_stats->num_missing_rx_frames++;
+        pending->num_pending_rx_frames--;
+        pending->rx_index = (pending->rx_index + 1) % MAX_PENDING_RX_FRAMES;
+    }
+    
+    /* Record the transmitted frame as pending receipt */
+    pending->pending_rx_sequence_numbers[pending->tx_index] = context->next_tx_sequence_number;
+    pending->tx_index = (pending->tx_index + 1) % MAX_PENDING_RX_FRAMES;
+    pending->num_pending_rx_frames++;
+
+    /* Advance to the next frame which will be transmitted */
+    context->next_tx_sequence_number++;
+    context->destination_port_index = (context->destination_port_index + 1) % NUM_TEST_PORTS;
+    if (context->destination_port_index == 0)
+    {
+        context->source_port_offset++;
+        if (context->source_port_offset == NUM_TEST_PORTS)
+        {
+            context->source_port_offset = 1;
+        }
+    }
+}
+
+
+/*
+ * @brief Thread which transmits test frames and checks for receipt of the frames from the switch under test
+ * @param[out] arg The context for the thread.
+ */
+static void *transmit_receive_thread (void *arg)
+{
+    frame_tx_rx_thread_context_t *const context = arg;
+    bool exit_requested = false;
+    struct pcap_pkthdr *pkt_header = NULL;
+    const u_char *pkt_data = NULL;
+    int64_t now;
+    int rc;
+    frame_record_t frame_record;
+
+    transmit_receive_initialise (context);
+    
+    /* Run test until requested to exit.
+     * This gives preference to polling for receipt of test frames, and when no available frame transmits the next test frame.
+     * This tries to send frames at the maximum possible rate, and relies upon the poll for frame receipt not causing any
+     * frames to be discarded by the network stack. */
+    while (!exit_requested)
+    {
+        now = get_monotonic_time ();
+
+        /* Poll for receipt of packet */
+        rc = pcap_next_ex (context->pcap_handle, &pkt_header, &pkt_data);
+        if (rc == PCAP_ERROR)
+        {
+            console_printf ("\nError receiving packet: %s\n", pcap_geterr(context->pcap_handle));
+            exit (EXIT_FAILURE);
+        }
+        else if (rc == 1)
+        {
+            /* Process received packet */
+            identify_frame (context, pkt_header, (const ethercat_frame_t *) pkt_data, &frame_record);
+            if (frame_record.frame_type != FRAME_RECORD_RX_OTHER)
+            {
+                handle_pending_rx_frame (context, &frame_record);
+            }
+            context->statistics.frame_counts[frame_record.frame_type]++;
+            record_frame_for_debug (context, &frame_record);
+        }
+        else
+        {
+            transmit_next_test_frame (context);
+        }
+        
+        if (now > context->test_interval_end_time)
+        {
+            /* The end of test interval has been reached */
+            context->statistics.interval_end_time = now;
+            if (arg_frame_debug_enabled)
+            {
+                exit_requested = true;
+            }
+            
+            /*@todo publish and reset statistics for next test when exit hasn't yet been requested */
+        }
+    }
+    
     return NULL;
 }
 
@@ -961,7 +1444,8 @@ int main (int argc, char *argv[])
         {
             /* Send the next frame, cycling around combinations of the source and destination ports */
             const uint32_t source_port_index = (destination_port_index + source_port_offset) % NUM_TEST_PORTS;
-            create_test_frame (&tx_frame, source_port_index, destination_port_index);
+            create_test_frame (&tx_frame, source_port_index, destination_port_index, next_transmit_sequence_number);
+            next_transmit_sequence_number++;
             record_test_frame (NULL, &tx_frame, start_time);
 #ifdef ENABLE_SEND_QUEUE
             send_pkt_header.caplen = sizeof (tx_frame);
