@@ -12,6 +12,7 @@
 #include <time.h>
 #include <stdarg.h>
 #include <getopt.h>
+#include <limits.h>
 
 #ifndef _WIN32
 #include <arpa/inet.h>
@@ -838,7 +839,7 @@ static uint32_t find_port_index_from_mac_addr_search (const uint8_t *const mac_a
  * @param[in] test_duration_src_dest_combinations The number of frames expected to be received for each combination of
  *                                                source and destination ports.
  */
-static void summarise_frame_loopback (const const uint32_t test_duration_src_dest_combinations)
+static void summarise_frame_loopback (const uint32_t test_duration_src_dest_combinations)
 {
     /* Used to count when the expected loopback frames have been received, indexed by the source and destination port indices */
     uint32_t num_expected_received_frames[NUM_TEST_PORTS][NUM_TEST_PORTS] = {0};
