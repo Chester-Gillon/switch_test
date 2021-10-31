@@ -11,15 +11,16 @@
 #include <stdio.h>
 #include <time.h>
 #include <stdarg.h>
-#include <getopt.h>
 #include <limits.h>
 
 #ifndef _WIN32
 #include <arpa/inet.h>
 #endif
 
+#include <sys/time.h>
 #include <pthread.h>
 #include <semaphore.h>
+#include <unistd.h>
 #include <pcap.h>
 
 
@@ -29,6 +30,15 @@
    to keep up and not report a test FAIL due to missing frames. */
 #define ENABLE_SEND_QUEUE
 #define SEND_QUEUE_LEN_FRAMES 200
+#endif
+
+
+/* Define a string to report the Operating System just to report in result filenames,
+ * when comparing results from multiple runs in the same directory in a PC which can be dual-booted. */
+#ifdef _WIN32
+#define OS_NAME "windows"
+#else
+#define OS_NAME "linux"
 #endif
 
 
@@ -166,6 +176,18 @@ typedef enum
 } frame_record_type_t;
 
 
+/* Look up table which gives the description of each frame_record_type_t */
+static const char *const frame_record_types[FRAME_RECORD_ARRAY_SIZE] =
+{
+    [FRAME_RECORD_TX_TEST_FRAME      ] = "Tx Test",
+    [FRAME_RECORD_TX_COPY_FRAME      ] = "Tx Copy",
+    [FRAME_RECORD_RX_TEST_FRAME      ] = "Rx Test",
+    [FRAME_RECORD_RX_UNEXPECTED_FRAME] = "Rx Unexpected",
+    [FRAME_RECORD_RX_FLOODED_FRAME   ] = "Rx Flooded",
+    [FRAME_RECORD_RX_OTHER           ] = "Rx Other"
+};
+
+
 /* Used to record one frame transmitted or received during the test, for debugging purposes */
 typedef struct
 {
@@ -193,6 +215,8 @@ typedef struct
      * based upon matching the source_mac_addr and destination_mac_addr */
     uint32_t source_port_index;
     uint32_t destination_port_index;
+    /* Set true for a FRAME_RECORD_TX_TEST_FRAME for which there is no matching FRAME_RECORD_RX_TEST_FRAME */
+    bool frame_missed;
 } frame_record_t;
 
 
@@ -225,7 +249,7 @@ typedef struct
 } receive_thread_context_t;
 
 
-/* Command line argument which specifies the name of the PCAP arg_pcap_interface_name used to send/receive test frames */
+/* Command line argument which specifies the name of the PCAP interface name used to send/receive test frames */
 static char arg_pcap_interface_name[PATH_MAX];
 
 /* Command line argument which specifies the test interval in seconds, which is the interval over which statistics are
@@ -237,7 +261,7 @@ static int64_t arg_test_interval_secs = 10;
  * - When false the test runs until requested to stop, and only reports summary information for each test interval.
  * - When true the test runs for a single test interval, recording the transmitted/received frames in memory which are written 
  *   to s CSV file at the end of the test interval. */
-static bool arg_frame_debug_enabled = true;
+static bool arg_frame_debug_enabled = false;
 
 
 /* Used to store pending receive frames for one source / destination port combination.
@@ -261,6 +285,11 @@ typedef struct
     uint32_t rx_index;
     /* Circular buffer used to record pending sequence numbers for receive frames */
     uint32_t pending_rx_sequence_numbers[MAX_PENDING_RX_FRAMES];
+    /* When frame debug is enabled points at the frame record for the FRAME_RECORD_TX_TEST_FRAME for each pending receive frame,
+     * so that if a frame is not received the transmit frame record can be marked as such.
+     *
+     * Done this way round to avoid marking any transmits frames at the end of a test sequence are not marked as missing. */
+    frame_record_t *tx_frame_records[MAX_PENDING_RX_FRAMES];
 } pending_rx_frames_t;
 
 
@@ -327,6 +356,20 @@ typedef struct
 } frame_tx_rx_thread_context_t;
 
 
+/* Contains the information for the results summary over multiple test intervals */
+typedef struct
+{
+    /* Filename used for the per-port counts */
+    char per_port_counts_csv_filename[PATH_MAX];
+    /* File to which the per-port counts are written */
+    FILE *per_port_counts_csv_file;
+    /* The number of test intervals which have had failures, due to missed frames */
+    uint32_t num_test_intervals_with_failures;
+    /* The string containing the time of the last test interval which had a failure */
+    char time_of_last_failure[80];
+} results_summary_t;
+
+
 /*
  * @brief Write formatted output to the console and a log file
  * @param[in] format printf style format string
@@ -366,10 +409,10 @@ static void display_available_interfaces (void)
         exit (EXIT_FAILURE);
     }
 
-    printf ("Available network interfaces: name (description)\n");
+    printf ("     Available network interfaces: name (description)\n");
     for (dev = alldevs; dev != NULL; dev = dev->next)
     {
-        printf ("%s", dev->name);
+        printf ("       %s", dev->name);
         if (dev->description != NULL)
         {
             printf (" (%s)\n", dev->description);
@@ -381,6 +424,78 @@ static void display_available_interfaces (void)
     }
 
     pcap_freealldevs (alldevs);
+}
+
+
+/**
+ * @brief Display the program usage and then exit
+ * @param[in] program_name Name of the program from argv[0]
+ */
+static void display_usage (const char *const program_name)
+{
+    printf ("Usage %s: -i <pcap_interface_name> [-t <duration_secs>] [-d]\n", program_name);
+    printf ("\n");
+    printf ("  -i specifies the name of the PCAP interface to send/receive frames on\n");
+    display_available_interfaces ();
+    printf ("\n");
+    printf ("  -d enables debug mode, where runs just for a single test interval and creates\n");
+    printf ("     a CSV file containing the frames sent/received.\n");
+    printf ("\n");
+    printf ("  -t defines the duration of a test interval in seconds, over which the number\n");
+    printf ("     errors is accumulated and reported.\n");
+    
+    exit (EXIT_FAILURE);
+}
+
+
+/**
+ * @brief Read the command line arguments, exiting if an error in the arguments
+ * @param[in] argc, argv Command line arguments passed to main
+ */
+static void read_command_line_arguments (const int argc, char *argv[])
+{
+    const char *const program_name = argv[0];
+    const char *const optstring = "i:dt:";
+    bool pcap_interface_specified = false;
+    int option;
+    char junk;
+    
+    option = getopt (argc, argv, optstring);
+    while (option != -1)
+    {
+        switch (option)
+        {
+        case 'i':
+            snprintf (arg_pcap_interface_name, sizeof (arg_pcap_interface_name), "%s", optarg);
+            pcap_interface_specified = true;
+            break;
+            
+        case 'd':
+            arg_frame_debug_enabled = true;
+            break;
+            
+        case 't':
+            if ((sscanf (optarg, "%" SCNi64 "%c", &arg_test_interval_secs, &junk) != 1) ||
+                (arg_test_interval_secs <= 0))
+            {
+                printf ("Error: Invalid <duration_secs> %s\n", optarg);
+            }
+            break;
+            
+        case '?':
+        default:
+            display_usage (program_name);
+            break;
+        }
+    
+        option = getopt (argc, argv, optstring);
+    }
+    
+    if (!pcap_interface_specified)
+    {
+        printf ("Error: The PCAP interface must be specified\n\n");
+        display_usage (program_name);
+    }
 }
 
 
@@ -842,7 +957,7 @@ static uint32_t find_port_index_from_mac_addr_search (const uint8_t *const mac_a
 static void summarise_frame_loopback (const uint32_t test_duration_src_dest_combinations)
 {
     /* Used to count when the expected loopback frames have been received, indexed by the source and destination port indices */
-    uint32_t num_expected_received_frames[NUM_TEST_PORTS][NUM_TEST_PORTS] = {0};
+    uint32_t num_expected_received_frames[NUM_TEST_PORTS][NUM_TEST_PORTS] = {{0}};
     
     /* Iterate around all transmit frames, searching forwards for the expected receive frame */
     uint32_t tx_frame_index = 0;
@@ -1060,14 +1175,23 @@ static bool get_port_index_from_mac_addr (const uint8_t *const mac_addr, uint32_
  * @brief When enabled by a command line option, record a transmit/receive frame for debug
  * @param[in/out] context Context to record the frame in
  * @param[in] frame_record The frame to record.
+ * @return Returns a pointer to the recorded frame entry, or NULL if not recorded.
+ *         Allows the caller to refer to the recorded frame for later updating the frame_missed field.
  */
-static void record_frame_for_debug (frame_tx_rx_thread_context_t *const context, const frame_record_t *const frame_record)
+static frame_record_t *record_frame_for_debug (frame_tx_rx_thread_context_t *const context,
+                                               const frame_record_t *const frame_record)
 {
+    frame_record_t *recorded_frame = NULL;
+    
     if (context->frame_recording.num_frame_records < context->frame_recording.allocated_length)
     {
-        context->frame_recording.frame_records[context->frame_recording.num_frame_records] = *frame_records;
+        recorded_frame = &context->frame_recording.frame_records[context->frame_recording.num_frame_records];
+        *recorded_frame = *frame_record;
+        recorded_frame->frame_missed = false;
         context->frame_recording.num_frame_records++;
     }
+    
+    return recorded_frame;
 }
 
 
@@ -1116,7 +1240,7 @@ static void identify_frame (const frame_tx_rx_thread_context_t *const context,
     }
 
     /* Determine if the frame is one generated by the test program */
-    bool is_test_frame = pkt_header->len >= sizeof (ethercat_frame_t);
+    bool is_test_frame = frame_record->len >= sizeof (ethercat_frame_t);
     
     if (is_test_frame)
     {
@@ -1174,9 +1298,14 @@ static void handle_pending_rx_frame (frame_tx_rx_thread_context_t *const context
             {
                 /* The sequence number is not the next expected pending, which means a preceeding frame has been missed */
                 port_stats->num_missing_rx_frames++;
+                if (pending->tx_frame_records[pending->rx_index] != NULL)
+                {
+                    pending->tx_frame_records[pending->rx_index]->frame_missed = true;
+                }
             }
             
             pending->num_pending_rx_frames--;
+            pending->tx_frame_records[pending->rx_index] = NULL;
             pending->rx_index = (pending->rx_index + 1) % MAX_PENDING_RX_FRAMES;
         }
         
@@ -1217,12 +1346,13 @@ static void transmit_next_test_frame (frame_tx_rx_thread_context_t *const contex
     }
 
     /* When debug is enabled identify the transmit frame and record it */
+    frame_record_t *recorded_frame = NULL;
     if (arg_frame_debug_enabled)
     {
         frame_record_t frame_record;
         
         identify_frame (context, NULL, &context->tx_frame, &frame_record);
-        record_frame_for_debug (context, &frame_record);
+        recorded_frame = record_frame_for_debug (context, &frame_record);
     }
 
     /* Update transmit frame counts */
@@ -1234,11 +1364,16 @@ static void transmit_next_test_frame (frame_tx_rx_thread_context_t *const contex
     {
         port_stats->num_missing_rx_frames++;
         pending->num_pending_rx_frames--;
+        if (pending->tx_frame_records[pending->rx_index] != NULL)
+        {
+            pending->tx_frame_records[pending->rx_index]->frame_missed = true;
+        }
         pending->rx_index = (pending->rx_index + 1) % MAX_PENDING_RX_FRAMES;
     }
     
     /* Record the transmitted frame as pending receipt */
     pending->pending_rx_sequence_numbers[pending->tx_index] = context->next_tx_sequence_number;
+    pending->tx_frame_records[pending->tx_index] = recorded_frame;
     pending->tx_index = (pending->tx_index + 1) % MAX_PENDING_RX_FRAMES;
     pending->num_pending_rx_frames++;
 
@@ -1320,15 +1455,319 @@ static void *transmit_receive_thread (void *arg)
 }
 
 
+/**
+ * @brief Write a CSV file which contains a record of the frames sent/received during a test.
+ * @details This is used to debug a single test interval.
+ * @param[in] frame_debug_csv_filename Name of CSV file to create
+ * @param[in] frame_recording The frames which were sent/received during the test
+ */
+static void write_frame_debug_csv_file (const char *const frame_debug_csv_filename, const frame_records_t *const frame_recording)
+{
+    /* Create CSV file and write headers */
+    FILE *const csv_file = fopen (frame_debug_csv_filename, "w");
+    if (csv_file == NULL)
+    {
+        console_printf ("Failed to create %s\n", frame_debug_csv_filename);
+        exit (EXIT_FAILURE);
+    }
+    fprintf (csv_file, "frame type,relative test time (secs),missed,source switch port,destination switch port,destination MAC addr,source MAC addr,len,ether type,VLAN,test sequence number\n");
+
+    /* Write one row per recorded frame */
+    for (uint32_t frame_index = 0; frame_index < frame_recording->num_frame_records; frame_index++)
+    {
+        const frame_record_t *const frame_record = &frame_recording->frame_records[frame_index];
+        
+        fprintf (csv_file, "%s,%.6f,%s",
+                frame_record_types[frame_record->frame_type],
+                frame_record->relative_test_time / 1E9,
+                frame_record->frame_missed ? "Frame missed" : "");
+        if (frame_record->frame_type != FRAME_RECORD_RX_OTHER)
+        {
+            fprintf (csv_file, ",%" PRIu32 ",%" PRIu32,
+                    test_ports[frame_record->source_port_index].switch_port_number,
+                    test_ports[frame_record->destination_port_index].switch_port_number);
+        }
+        else
+        {
+            fprintf (csv_file, ",,");
+        }
+        write_mac_addr (csv_file, frame_record->destination_mac_addr);
+        write_mac_addr (csv_file, frame_record->source_mac_addr);
+        fprintf (csv_file, ",%u,'%04x", frame_record->len, frame_record->ether_type);
+        if (frame_record->vlan_present)
+        {
+            fprintf (csv_file, ",%" PRIu32, frame_record->vlan_id);
+        }
+        else
+        {
+            fprintf (csv_file, ",");
+        }
+        if (frame_record->frame_type != FRAME_RECORD_RX_OTHER)
+        {
+            fprintf (csv_file, ",%" PRIu32, frame_record->test_sequence_number);
+        }
+        else
+        {
+            fprintf (csv_file, ",");
+        }
+        fprintf (csv_file, "\n");
+    }
+    
+    fclose (csv_file);
+}
+
+
+/*
+ * @brief Write the frame test statistics from the most recent test interval.
+ * @details This is written as:
+ *          - The console with a overall summary of which combinations of source/destination ports have missed frames.
+ *          - A CSV file which has the per-port count of frames.
+ * @param[in/out] results_summary Used to maintain a summary of which test intervals have had test failures.
+ * @param[in] statistics The statistics crom the most recent interval
+ */
+static void write_frame_test_statistics (results_summary_t *const results_summary,
+                                         const frame_test_statistics_t *const statistics)
+{
+    uint32_t source_port_index;
+    uint32_t destination_port_index;
+    char time_str[80];
+    struct tm broken_down_time;
+    struct timeval tod;
+    frame_record_type_t frame_type;
+
+    /* Display time when these statistics are reported */
+    gettimeofday (&tod, NULL);
+    const time_t tod_sec = tod.tv_sec;
+    const int64_t tod_msec = tod.tv_usec / 1000;
+    localtime_r (&tod_sec, &broken_down_time);
+    strftime (time_str, sizeof (time_str), "%H:%M:%S", &broken_down_time);
+    size_t str_len = strlen (time_str);
+    snprintf (&time_str[str_len], sizeof (time_str) - str_len, ".%03" PRIi64, tod_msec);
+    
+    console_printf ("\n%s\n", time_str);
+
+    /* Print header for counts */
+    const int count_field_width = 13;
+    for (frame_type = 0; frame_type < FRAME_RECORD_ARRAY_SIZE; frame_type++)
+    {
+        console_printf ("%*s  ", count_field_width, frame_record_types[frame_type]); 
+    }
+    console_printf ("%*s  %*s\n", count_field_width, "missed frames", count_field_width, "tx rate (Hz)");
+    
+    /* Display the count of the different frame types during the test interval.
+     * Even when no missing frames the count of the transmit and receive frames may be different due to frames
+     * still in flight at the end of the test interval. */
+    for (frame_type = 0; frame_type < FRAME_RECORD_ARRAY_SIZE; frame_type++)
+    {
+        console_printf ("%*" PRIu32 "  ", count_field_width, statistics->frame_counts[frame_type]);
+    }
+
+    /* Report the total number of missing frames during the test interval */
+    uint32_t total_missing_frames = 0;
+    for (source_port_index = 0; source_port_index < NUM_TEST_PORTS; source_port_index++)
+    {
+        for (destination_port_index = 0; destination_port_index < NUM_TEST_PORTS; destination_port_index++)
+        {
+            total_missing_frames += 
+                    statistics->port_frame_statistics[source_port_index][destination_port_index].num_missing_rx_frames;
+        }
+    }
+    console_printf ("%*" PRIu32 "  ", count_field_width, total_missing_frames);
+    
+    /* Report the average frame rate achieved over the statistics interval */
+    const double statistics_interval_secs = (double) (statistics->interval_end_time - statistics->interval_start_time) / 1E9;
+    console_printf ("%*.1f\n", count_field_width,
+            (double) statistics->frame_counts[FRAME_RECORD_TX_TEST_FRAME] / statistics_interval_secs);
+    
+    /* Display summary of missed frames over combination of source / destination ports */
+    console_printf ("\nSummary of missed frames : '.' none missed 'S' some missed 'A' all misssed\n");
+    console_printf ("Source  Destination ports --->\n");
+    for (uint32_t header_row = 0; header_row < 2; header_row++)
+    {
+        console_printf ("%s", (header_row == 0) ? "  port  " : "        ");
+        for (destination_port_index = 0; destination_port_index < NUM_TEST_PORTS; destination_port_index++)
+        {
+            char port_num_text[3];
+            
+            snprintf (port_num_text, sizeof (port_num_text), "%2" PRIu32, test_ports[destination_port_index].switch_port_number);
+            console_printf ("%c", port_num_text[header_row]);
+        }
+        console_printf ("\n");
+    }
+
+    for (source_port_index = 0; source_port_index < NUM_TEST_PORTS; source_port_index++)
+    {
+        console_printf ("    %2" PRIu32 "  ", test_ports[source_port_index].switch_port_number);
+        for (destination_port_index = 0; destination_port_index < NUM_TEST_PORTS; destination_port_index++)
+        {
+            const port_frame_statistics_t *const port_statistics =
+                    &statistics->port_frame_statistics[source_port_index][destination_port_index];
+            char port_status;
+            
+            if (source_port_index == destination_port_index)
+            {
+                port_status = ' ';
+            }
+            else if (port_statistics->num_missing_rx_frames == 0)
+            {
+                port_status = '.';
+            }
+            else if (port_statistics->num_valid_rx_frames > 0)
+            {
+                port_status = 'S';
+            }
+            else
+            {
+                port_status = 'A';
+            }
+            console_printf ("%c", port_status);
+        }
+        console_printf ("\n");
+    }
+    
+    /* Any missed frames counts as a test failure */
+    if (total_missing_frames > 0)
+    {
+        results_summary->num_test_intervals_with_failures++;
+        snprintf (results_summary->time_of_last_failure, sizeof (results_summary->time_of_last_failure), "%s", time_str);
+    }
+    
+    /* Create per-port counts CSV file on first call, and write column headers */
+    if (results_summary->per_port_counts_csv_file == NULL)
+    {
+        results_summary->per_port_counts_csv_file = fopen (results_summary->per_port_counts_csv_filename, "w");
+        if (results_summary->per_port_counts_csv_file == NULL)
+        {
+            console_printf ("Failed to create %s\n", results_summary->per_port_counts_csv_filename);
+            exit (EXIT_FAILURE);
+        }
+        fprintf (results_summary->per_port_counts_csv_file,
+                "Time,Source switch port,Destination switch port,Num tx frames,Num valid rx frames,Num missing rx frames\n");
+    }
+    
+    /* Write one row containing the number of frames per combination of source and destination switch ports tested */
+    for (source_port_index = 0; source_port_index < NUM_TEST_PORTS; source_port_index++)
+    {
+        for (destination_port_index = 0; destination_port_index < NUM_TEST_PORTS; destination_port_index++)
+        {
+            if (source_port_index != destination_port_index)
+            {
+                const port_frame_statistics_t *const port_statistics =
+                        &statistics->port_frame_statistics[source_port_index][destination_port_index];
+                
+                fprintf (results_summary->per_port_counts_csv_file,
+                        " %s,%" PRIu32 ",%" PRIu32 ",%" PRIu32 ",%" PRIu32 ",%" PRIu32 "\n",
+                        time_str, 
+                        test_ports[source_port_index].switch_port_number,
+                        test_ports[destination_port_index].switch_port_number,
+                        port_statistics->num_tx_frames,
+                        port_statistics->num_valid_rx_frames,
+                        port_statistics->num_missing_rx_frames);
+            }
+        }
+    }
+    
+    /* Display overall summary of test failures */
+    console_printf ("Total test intervals with failures = %" PRIu32, results_summary->num_test_intervals_with_failures);
+    if (results_summary->num_test_intervals_with_failures)
+    {
+        console_printf (" : last failure %s\n", (total_missing_frames > 0) ? "NOW" : results_summary->time_of_last_failure);
+    }
+    else
+    {
+        console_printf ("\n");
+    }
+}
+
+
 int main (int argc, char *argv[])
 {
+    int rc;
+    
     /* Check that ethercat_frame_t has the expected size */
     if (sizeof (ethercat_frame_t) != 1514)
     {
         fprintf (stderr, "sizeof (ethercat_frame_t) unexpected value of %" PRIuPTR "\n", sizeof (ethercat_frame_t));
         exit (EXIT_FAILURE);
     }
+
+    /* Read the commandline arguments, and get the interface description which validates the interface */
+    read_command_line_arguments (argc, argv);
+    const char *const interface_description = get_interface_description (arg_pcap_interface_name);
     
+    if (interface_description == NULL)
+    {
+        fprintf (stderr, "Interface name %s not found\n", arg_pcap_interface_name);
+        exit (EXIT_FAILURE);
+    }
+
+    if (!arg_frame_debug_enabled)
+    {
+        printf ("@todo for now debug mode must be specified\n");
+        exit (EXIT_FAILURE);
+    }
+
+    /* Set filenames which contain the output files containing the date/time and OS used  */
+    results_summary_t results_summary = {{0}};
+    const time_t tod_now = time (NULL);
+    struct tm broken_down_time;
+    char date_time_str[80];
+    char frame_debug_csv_filename[80];
+    char console_filename[80];
+    
+    localtime_r (&tod_now, &broken_down_time);
+    strftime (date_time_str, sizeof (date_time_str), "%Y%m%dT%H%M%S", &broken_down_time);
+    snprintf (frame_debug_csv_filename, sizeof (frame_debug_csv_filename), "%s_frames_debug_%s.csv", date_time_str, OS_NAME);
+    snprintf (console_filename, sizeof (console_filename), "%s_console_%s.txt", date_time_str, OS_NAME);
+    snprintf (results_summary.per_port_counts_csv_filename, sizeof (results_summary.per_port_counts_csv_filename),
+            "%s_per_port_counts_%s.csv", date_time_str, OS_NAME);
+    
+    console_file = fopen (console_filename, "wt");
+    if (console_file == NULL)
+    {
+        fprintf (stderr, "Failed to create %s\n", console_filename);
+        exit (EXIT_FAILURE);
+    }
+    
+    /* Report the command line arguments used */
+    console_printf ("Using interface %s (%s)\n", arg_pcap_interface_name, interface_description);
+    console_printf ("Test interval = %" PRIi64 " (secs)\n", arg_test_interval_secs);
+    console_printf ("Frame debug enabled = %s\n", arg_frame_debug_enabled ? "Yes" : "No");
+    
+    /* @todo for this initial test just run the transmit_receive_thread for one test iteration */
+    frame_tx_rx_thread_context_t *const tx_rx_thread_context = calloc (1, sizeof (*tx_rx_thread_context));
+    pthread_t tx_rx_thread_handle;
+
+    rc = pthread_create (&tx_rx_thread_handle, NULL, transmit_receive_thread, tx_rx_thread_context);
+    if (rc != 0)
+    {
+        console_printf ("pthread_create() failed rc=%d\n", rc);
+        exit (EXIT_FAILURE);
+    }
+
+    rc = pthread_join (tx_rx_thread_handle, NULL);
+    if (rc != 0)
+    {
+        console_printf ("pthread_join() failed rc=%d\n", rc);
+        exit (EXIT_FAILURE);
+    }
+    
+    write_frame_test_statistics (&results_summary, &tx_rx_thread_context->statistics);
+    if (arg_frame_debug_enabled)
+    {
+        write_frame_debug_csv_file (frame_debug_csv_filename, &tx_rx_thread_context->frame_recording);
+    }
+
+    fclose (results_summary.per_port_counts_csv_file);
+    fclose (console_file);
+    
+    return EXIT_SUCCESS;
+}
+
+
+/* @todo remove following previous code once the new transmit_receive_thread() has been tested */
+int old_main (int argc, char *argv[])
+{
     /* Process command line arguments */
     if (argc < 3)
     {
