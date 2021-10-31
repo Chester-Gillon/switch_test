@@ -33,30 +33,36 @@ npcap_lib_dir = fullfile (npcap_root, 'Lib', 'x64');
 % MinGW options to build against NPCAP
 npcap_options = ['-I ' npcap_include_dir ' -L ' npcap_lib_dir ' -l wpcap -l Ws2_32'];
 
+% Build the program for Debug and Release
+build_configurations={'Debug', 'Release'};
+build_configuration_flags={' -g', ' -O3'};
+
 % Root directory for the build of the programs is the directory containing
 % this function
 [build_root,~,~] = fileparts (mfilename('fullpath'));
-exe_dir = fullfile (build_root, 'Debug');
-
-if ~isfolder (exe_dir)
-    mkdir (exe_dir);
+for build_configuration_index = 1:length (build_configurations)
+    exe_dir = fullfile (build_root, build_configurations{build_configuration_index});
+    
+    if ~isfolder (exe_dir)
+        mkdir (exe_dir);
+    end
+    
+    % Compile the program.
+    % a. The PATH is set to the MinGW directory as gcc needs to load some DLLs
+    %    in the same directory.
+    % b. The static pthread avoids DLL dependencies.
+    % c. The -mno-ms-bitfields is required to get the size of the
+    %    ethercat_frame_t structure correct which contains bit-fields spanning
+    %    16-bits and 32-bit fields.
+    % d. _POSIX_THREAD_SAFE_FUNCTIONS is defined to allow localtime_r() to be
+    %    used.
+    system(['set PATH=' mingw_path ';%PATH && ' ...
+        gcc_exe ' -Wall -mno-ms-bitfields ' fullfile(build_root, 'switch_test_main.c') ...
+        ' -D _POSIX_THREAD_SAFE_FUNCTIONS' ...
+        ' -o '  fullfile(exe_dir,'switch_test.exe') ...
+        ' -Wl,-Bstatic -lpthread -Wl,-Bdynamic ' ...
+        ' ' npcap_options ...
+        build_configuration_flags{build_configuration_index}]);
+    
 end
-
-% Compile the program.
-% a. The PATH is set to the MinGW directory as gcc needs to load some DLLs
-%    in the same directory.
-% b. The static pthread avoids DLL dependencies.
-% c. The -mno-ms-bitfields is required to get the size of the 
-%    ethercat_frame_t structure correct which contains bit-fields spanning
-%    16-bits and 32-bit fields.
-% d. _POSIX_THREAD_SAFE_FUNCTIONS is defined to allow localtime_r() to be
-%    used.
-system(['set PATH=' mingw_path ';%PATH && ' ...
-    gcc_exe ' -Wall -mno-ms-bitfields ' fullfile(build_root, 'switch_test_main.c') ...
-    ' -D _POSIX_THREAD_SAFE_FUNCTIONS' ...
-    ' -o '  fullfile(exe_dir,'switch_test.exe') ...
-    ' -Wl,-Bstatic -lpthread -Wl,-Bdynamic ' ...
-    ' ' npcap_options ...
-    ' -g']);
-
 end
