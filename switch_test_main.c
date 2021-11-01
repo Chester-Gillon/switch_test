@@ -21,6 +21,7 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include <unistd.h>
+#include <signal.h>
 #include <pcap.h>
 
 
@@ -323,6 +324,8 @@ typedef struct
      * They are used to report diagnostic information about if missed frames could be due to dropped packets in the software,
      * rather than the switch under test. */
     struct pcap_stat pcap_statistics;
+    /* Set true in the final statistics before the transmit/receive thread exits */
+    bool final_statistics;
 } frame_test_statistics_t;
 
 
@@ -374,6 +377,41 @@ typedef struct
     /* The string containing the time of the last test interval which had a failure */
     char time_of_last_failure[80];
 } results_summary_t;
+
+
+/* test_statistics contains the statistics from the most recent completed test interval.
+ * It is written by the transmit_receive_thread, and read by the main thread to report the test progress.
+ *
+ * The semphores control the access by:
+ * a. The free semaphore is initialised to 1, and the populated semaphore to 0.
+ * b. The main thread blocks in sem_wait (test_statistics_populated) waiting for results.
+ * c. At the end of a test interval the transmit_receive_thread:
+ *    - sem_wait (test_statistics_free) which should not block unless the main thread isn't keeping up with reporting
+ *      the test progress.
+ *    - Stores the results for the completed test interval in test_statistics
+ *    - sem_post (test_statistics_populated) to wake up the main thread.
+ * d. When the main thread is woken up from sem_wait(test_statistics_populated):
+ *    - Reports the contents of test_statistics
+ *    - sem_post (test_statistics_free) to indicate has processed test_statistics
+ * e. The sequence starts again from b.
+ */
+static frame_test_statistics_t test_statistics;
+static sem_t test_statistics_free;
+static sem_t test_statistics_populated;
+
+
+/* Set true in a signal handler when Ctrl-C is used to request a running test stops */
+static volatile bool test_stop_requested;
+
+
+/**
+ * @brief Signal handler to request a running test stops
+ * @param[in] sig Not used
+ */
+static void stop_test_handler (const int sig)
+{
+    test_stop_requested = true;
+}
 
 
 /*
@@ -1132,6 +1170,7 @@ static void transmit_receive_initialise (frame_tx_rx_thread_context_t *const con
         }
     }
     reset_frame_test_statistics (&context->statistics);
+    context->statistics.final_statistics = false;
     
     if (arg_frame_debug_enabled)
     {
@@ -1464,10 +1503,33 @@ static void *transmit_receive_thread (void *arg)
             {
                 exit_requested = true;
             }
+            else if (test_stop_requested)
+            {
+                exit_requested = true;
+            }
             
-            /*@todo publish and reset statistics for next test when exit hasn't yet been requested */
+            /* Publish and then reset statistics for the next test interval */
+            rc = sem_wait (&test_statistics_free);
+            if (rc != 0)
+            {
+                console_printf ("sem_wait (&test_statistics) failed\n");
+                exit (EXIT_FAILURE);
+            }
+            context->statistics.final_statistics = exit_requested;
+            test_statistics = context->statistics;
+            rc = sem_post (&test_statistics_populated);
+            if (rc != 0)
+            {
+                console_printf ("sem_post (&test_statistics_populated) failed\n");
+                exit (EXIT_FAILURE);
+            }
+            reset_frame_test_statistics (&context->statistics);
+            context->statistics.interval_start_time = context->statistics.interval_end_time;
+            context->test_interval_end_time += (arg_test_interval_secs * NSECS_PER_SEC);
         }
     }
+
+    pcap_close (context->pcap_handle);
     
     return NULL;
 }
@@ -1711,10 +1773,18 @@ int main (int argc, char *argv[])
         fprintf (stderr, "Interface name %s not found\n", arg_pcap_interface_name);
         exit (EXIT_FAILURE);
     }
-
-    if (!arg_frame_debug_enabled)
+    
+    /* Initialise the semaphores used to control access to the test interval statistics */
+    rc = sem_init (&test_statistics_free, 0, 1);
+    if (rc != 0)
     {
-        printf ("@todo for now debug mode must be specified\n");
+        fprintf (stderr, "sem_init() failed\n");
+        exit (EXIT_FAILURE);
+    }
+    rc = sem_init (&test_statistics_populated, 0, 0);
+    if (rc != 0)
+    {
+        fprintf (stderr, "sem_init() failed\n");
         exit (EXIT_FAILURE);
     }
 
@@ -1741,11 +1811,12 @@ int main (int argc, char *argv[])
     }
     
     /* Report the command line arguments used */
+    console_printf ("Writing per-port counts to %s\n", results_summary.per_port_counts_csv_filename);
     console_printf ("Using interface %s (%s)\n", arg_pcap_interface_name, interface_description);
     console_printf ("Test interval = %" PRIi64 " (secs)\n", arg_test_interval_secs);
     console_printf ("Frame debug enabled = %s\n", arg_frame_debug_enabled ? "Yes" : "No");
     
-    /* @todo for this initial test just run the transmit_receive_thread for one test iteration */
+    /* Create the transmit_receive_thread */
     frame_tx_rx_thread_context_t *const tx_rx_thread_context = calloc (1, sizeof (*tx_rx_thread_context));
     pthread_t tx_rx_thread_handle;
 
@@ -1755,15 +1826,66 @@ int main (int argc, char *argv[])
         console_printf ("pthread_create() failed rc=%d\n", rc);
         exit (EXIT_FAILURE);
     }
+    
+    /* Report that the test has started */
+    if (arg_frame_debug_enabled)
+    {
+        console_printf ("Running for a single test interval to collect debug information\n");
+    }
+    else
+    {
+#ifdef _WIN32
+        signal (SIGINT, stop_test_handler);
+#else
+        struct sigaction action;
+        
+        memset (&action, 0, sizeof (action));
+        action.sa_handler = stop_test_handler;
+        action.sa_flags = SA_RESTART;
+        rc = sigaction (SIGINT, &action, NULL);
+        if (rc != 0)
+        {
+            console_printf ("sigaction() failed rc=%d\n", rc);
+            exit (EXIT_FAILURE);
+        }
+#endif
+        console_printf ("Press Ctrl-C to stop test at end of next test interval\n");
+    }
+    
+    /* Report the statistics for each test interval, stopping when get the final statistics */
+    bool exit_requested = false;
+    while (!exit_requested)
+    {
+        /* Wait for the statistics upon completion of a test interval */
+        rc = sem_wait (&test_statistics_populated);
+        if (rc != 0)
+        {
+            console_printf ("sem_wait (&test_statistics_populated) failed rc=%d\n", rc);
+            exit (EXIT_FAILURE);
+        }            
 
+        /* Report the statistics */
+        write_frame_test_statistics (&results_summary, &test_statistics);
+        exit_requested = test_statistics.final_statistics;
+        
+        /* Indicate the main thread has completed using the test_statistics */
+        rc = sem_post (&test_statistics_free);
+        if (rc != 0)
+        {
+            console_printf ("sem_wait (&test_statistics_populated) failed rc=%d\n", rc);
+            exit (EXIT_FAILURE);
+        }            
+    }
+
+    /* Wait for the transmit_receive_thread to exit */
     rc = pthread_join (tx_rx_thread_handle, NULL);
     if (rc != 0)
     {
         console_printf ("pthread_join() failed rc=%d\n", rc);
         exit (EXIT_FAILURE);
     }
-    
-    write_frame_test_statistics (&results_summary, &tx_rx_thread_context->statistics);
+
+    /* Write the debug frame recording information if enabled */
     if (arg_frame_debug_enabled)
     {
         write_frame_debug_csv_file (frame_debug_csv_filename, &tx_rx_thread_context->frame_recording);
