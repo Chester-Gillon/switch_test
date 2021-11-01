@@ -280,3 +280,118 @@ port         0       1       2       3       4       5       6
      6     100     100     100       0     100     100
 
 Test: FAIL
+
+
+== Realtek PCIe GBE Family Controller not capturing VLAN tags under Windows 10 20H2 ==
+
+Running the switch_test under Windows 10 home 20H2 with a "Realtek PCIe GBE Family Controller" reports all frames missed.
+
+The debug capture shows the test frams reported as "Rx Other" due to their being no VLAN tag.
+
+https://osqa-ask.wireshark.org/questions/5996/how-to-configure-realtek-pcie-gbe-family-controller-to-capture-vlan-tag-packet/
+describes the issue.
+
+Under the adapter Advanced settings changed "Priority & VLAN" from "Priority & VLAN Enabled" to
+"Priority & VLAN Disabled" and then rebooted.
+
+After that change the received VLAN tags were still stipped. Therefore, reverted the change.
+
+Followed http://forum.gns3.net/topic7559.html :
+2. Once installed, went to my regedit in: HKEY_LOCAL_MACHINE\SYSTEM\ControlSet001\Control\Class\{4D36E972-E325-11CE-BFC1-08002BE10318}\00nn
+Where nn is the physical instance of the network port where you want to capture the VLAN tags.
+
+3. Added / Edited the following DWORDS:
+
+MonitorModeEnabled - 1
+MonitorMode - 1
+*PriorityVLANTag - 0
+SkDisableVlanStrip - 1
+
+Where the actual path was Computer\HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Class\{4d36e972-e325-11ce-bfc1-08002be10318}\0001
+i.e. instance 1.
+
+After a reboot when VLAN tags were no longer stripped upon receipt.
+
+On the first run only ports 1-4 were reported as working:
+C:\Users\mr_halfword\switch_test\Release>switch_test.exe -i \Device\NPF_{430850D4-29A0-4350-999F-67F14C708174} -d
+Using interface \Device\NPF_{430850D4-29A0-4350-999F-67F14C708174} (Realtek PCIe GBE Family Controller)
+Test interval = 10 (secs)
+Frame debug enabled = Yes
+
+14:44:11.286
+      Tx Test        Tx Copy        Rx Test  Rx Unexpected     Rx Flooded       Rx Other  missed frames   tx rate (Hz)
+        50657          50657           1098              0          22038              0          47939         5065.7
+
+Summary of missed frames : '.' none missed 'S' some missed 'A' all misssed
+Source  Destination ports --->
+  port           111111111122222
+        123456789012345678901234
+     1   ...AAAAAAAAAAAAAAAAAAAA
+     2  . ..AAAAAAAAAAAAAAAAAAAA
+     3  .. .AAAAAAAAAAAAAAAAAAAA
+     4  ... AAAAAAAAAAAAAAAAAAAA
+     5  AAAA AAAAAAAAAAAAAAAAAAA
+     6  AAAAA AAAAAAAAAAAAAAAAAA
+     7  AAAAAA AAAAAAAAAAAAAAAAA
+     8  AAAAAAA AAAAAAAAAAAAAAAA
+     9  AAAAAAAA AAAAAAAAAAAAAAA
+    10  AAAAAAAAA AAAAAAAAAAAAAA
+    11  AAAAAAAAAA AAAAAAAAAAAAA
+    12  AAAAAAAAAAA AAAAAAAAAAAA
+    13  AAAAAAAAAAAA AAAAAAAAAAA
+    14  AAAAAAAAAAAAA AAAAAAAAAA
+    15  AAAAAAAAAAAAAA AAAAAAAAA
+    16  AAAAAAAAAAAAAAA AAAAAAAA
+    17  AAAAAAAAAAAAAAAA AAAAAAA
+    18  AAAAAAAAAAAAAAAAA AAAAAA
+    19  AAAAAAAAAAAAAAAAAA AAAAA
+    20  AAAAAAAAAAAAAAAAAAA AAAA
+    21  AAAAAAAAAAAAAAAAAAAA AAA
+    22  AAAAAAAAAAAAAAAAAAAAA AA
+    23  AAAAAAAAAAAAAAAAAAAAAA A
+    24  AAAAAAAAAAAAAAAAAAAAAAA
+Total test intervals with failures = 1 : last failure NOW
+
+After rebooting the LevelOne GSW-2472TGX switch under test, via its serial console, the next test was successful:
+C:\Users\mr_halfword\switch_test\Release>switch_test.exe -i \Device\NPF_{430850D4-29A0-4350-999F-67F14C708174} -d
+Using interface \Device\NPF_{430850D4-29A0-4350-999F-67F14C708174} (Realtek PCIe GBE Family Controller)
+Test interval = 10 (secs)
+Frame debug enabled = Yes
+
+14:48:40.796
+      Tx Test        Tx Copy        Rx Test  Rx Unexpected     Rx Flooded       Rx Other  missed frames   tx rate (Hz)
+        46647          46647          46645              0             22              0              0         4664.6
+
+Summary of missed frames : '.' none missed 'S' some missed 'A' all misssed
+Source  Destination ports --->
+  port           111111111122222
+        123456789012345678901234
+     1   .......................
+     2  . ......................
+     3  .. .....................
+     4  ... ....................
+     5  .... ...................
+     6  ..... ..................
+     7  ...... .................
+     8  ....... ................
+     9  ........ ...............
+    10  ......... ..............
+    11  .......... .............
+    12  ........... ............
+    13  ............ ...........
+    14  ............. ..........
+    15  .............. .........
+    16  ............... ........
+    17  ................ .......
+    18  ................. ......
+    19  .................. .....
+    20  ................... ....
+    21  .................... ...
+    22  ..................... ..
+    23  ...................... .
+    24  .......................
+Total test intervals with failures = 0
+
+Had some more instances on only ports 1 to 4 working, and from the serial console could see that the LevelOne GSW-2472TGX switch
+had been rebooting itself.
+ 
