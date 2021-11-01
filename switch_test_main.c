@@ -317,6 +317,12 @@ typedef struct
     uint32_t frame_counts[FRAME_RECORD_ARRAY_SIZE];
     /* Receive frame counts, indexed by each [source_port][destination_port] combination */
     port_frame_statistics_t port_frame_statistics[NUM_TEST_PORTS][NUM_TEST_PORTS];
+    /* Counts the total number of missing frames during the test interval */
+    uint32_t total_missing_frames;
+    /* The PCAP statistics, which are only sampled at the end of a test iteration if total_missing_frames is non-zero.
+     * They are used to report diagnostic information about if missed frames could be due to dropped packets in the software,
+     * rather than the switch under test. */
+    struct pcap_stat pcap_statistics;
 } frame_test_statistics_t;
 
 
@@ -1088,6 +1094,7 @@ static void reset_frame_test_statistics (frame_test_statistics_t *const statisti
     {
         statistics->frame_counts[frame_type] = 0;
     }
+    statistics->total_missing_frames = 0;
     for (uint32_t source_port_index = 0; source_port_index < NUM_TEST_PORTS; source_port_index++)
     {
         for (uint32_t destination_port_index = 0; destination_port_index < NUM_TEST_PORTS; destination_port_index++)
@@ -1298,6 +1305,7 @@ static void handle_pending_rx_frame (frame_tx_rx_thread_context_t *const context
             {
                 /* The sequence number is not the next expected pending, which means a preceeding frame has been missed */
                 port_stats->num_missing_rx_frames++;
+                context->statistics.total_missing_frames++;
                 if (pending->tx_frame_records[pending->rx_index] != NULL)
                 {
                     pending->tx_frame_records[pending->rx_index]->frame_missed = true;
@@ -1363,6 +1371,7 @@ static void transmit_next_test_frame (frame_tx_rx_thread_context_t *const contex
     if (pending->num_pending_rx_frames == MAX_PENDING_RX_FRAMES)
     {
         port_stats->num_missing_rx_frames++;
+        context->statistics.total_missing_frames++;
         pending->num_pending_rx_frames--;
         if (pending->tx_frame_records[pending->rx_index] != NULL)
         {
@@ -1442,6 +1451,15 @@ static void *transmit_receive_thread (void *arg)
         {
             /* The end of test interval has been reached */
             context->statistics.interval_end_time = now;
+            if (context->statistics.total_missing_frames > 0)
+            {
+                rc = pcap_stats (context->pcap_handle, &context->statistics.pcap_statistics);
+                if (rc == PCAP_ERROR)
+                {
+                    console_printf ("\npcap_stats() failed: %s\n", pcap_geterr(context->pcap_handle));
+                    exit (EXIT_FAILURE);
+                }
+            }
             if (arg_frame_debug_enabled)
             {
                 exit_requested = true;
@@ -1563,16 +1581,7 @@ static void write_frame_test_statistics (results_summary_t *const results_summar
     }
 
     /* Report the total number of missing frames during the test interval */
-    uint32_t total_missing_frames = 0;
-    for (source_port_index = 0; source_port_index < NUM_TEST_PORTS; source_port_index++)
-    {
-        for (destination_port_index = 0; destination_port_index < NUM_TEST_PORTS; destination_port_index++)
-        {
-            total_missing_frames += 
-                    statistics->port_frame_statistics[source_port_index][destination_port_index].num_missing_rx_frames;
-        }
-    }
-    console_printf ("%*" PRIu32 "  ", count_field_width, total_missing_frames);
+    console_printf ("%*" PRIu32 "  ", count_field_width, statistics->total_missing_frames);
     
     /* Report the average frame rate achieved over the statistics interval */
     const double statistics_interval_secs = (double) (statistics->interval_end_time - statistics->interval_start_time) / 1E9;
@@ -1626,10 +1635,12 @@ static void write_frame_test_statistics (results_summary_t *const results_summar
     }
     
     /* Any missed frames counts as a test failure */
-    if (total_missing_frames > 0)
+    if (statistics->total_missing_frames > 0)
     {
         results_summary->num_test_intervals_with_failures++;
         snprintf (results_summary->time_of_last_failure, sizeof (results_summary->time_of_last_failure), "%s", time_str);
+        console_printf ("PCAP statistics : ps_recv=%" PRIu32 " ps_drop=%" PRIu32 " ps_ifdrop=%" PRIu32 "\n",
+                statistics->pcap_statistics.ps_recv, statistics->pcap_statistics.ps_drop, statistics->pcap_statistics.ps_ifdrop);
     }
     
     /* Create per-port counts CSV file on first call, and write column headers */
@@ -1671,7 +1682,7 @@ static void write_frame_test_statistics (results_summary_t *const results_summar
     console_printf ("Total test intervals with failures = %" PRIu32, results_summary->num_test_intervals_with_failures);
     if (results_summary->num_test_intervals_with_failures)
     {
-        console_printf (" : last failure %s\n", (total_missing_frames > 0) ? "NOW" : results_summary->time_of_last_failure);
+        console_printf (" : last failure %s\n", (statistics->total_missing_frames > 0) ? "NOW" : results_summary->time_of_last_failure);
     }
     else
     {
