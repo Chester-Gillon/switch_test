@@ -1,0 +1,89 @@
+== Introduction ==
+
+With commit cb351730 01/11/2021 22:20 which first added code which could run the test continuously, under Linux which 
+could transmit frames at near 1 Gb line rate on some test iterations missed frames were reported as well as a non-zero ps_drop.
+Where ps_drop means packets were dropped by the Kernel as they were not being read quickly enough.
+
+Of the two Linux PC, a Lenovo ideapad 510S with Intel(R) Core(TM) i5-7200U CPU running Ubuntu 18.04 with a 4.15.0-161-generic 
+Kernel suffered a higher rate of ps_drop so investigated on that.
+
+== Initial results ==
+
+In the first test iteration, the number of missed frames and value of ps_drop were both 32.
+
+12:59:06.713
+      Tx Test        Tx Copy        Rx Test  Rx Unexpected     Rx Flooded       Rx Other  missed frames   tx rate (Hz)
+       811899              0         811749              0             17              0             32        81189.8
+
+Summary of missed frames : '.' none missed 'S' some missed 'A' all missed
+Source  Destination ports --->
+  port           111111111122222
+        123456789012345678901234
+     1   .......S...............
+     2  . .......S...S..........
+     3  .. .....................
+     4  ... ....................
+     5  .... ............S......
+     6  ..... ............S.....
+     7  ...... ............S....
+     8  ....... ............S...
+     9  ........ ............S..
+    10  ......... ............S.
+    11  .......... ............S
+    12  ........... ........S...
+    13  S........... ........S..
+    14  .S........... ........S.
+    15  ..S........... ........S
+    16  ...S........... ........
+    17  S...S........... .......
+    18  .S...S........... ......
+    19  ..S...S........... .....
+    20  ...S...S........... ....
+    21  ....S...S........... ...
+    22  .....S...S........... ..
+    23  ......S...S........... .
+    24  ....................... 
+PCAP statistics : ps_recv=811813 ps_drop=32 ps_ifdrop=811810
+Total test intervals with failures = 1 : last failure NOW
+
+The value of ps_drop is cumulative, and the delta between ps_drop matches the number of missed frames on further failures.
+This points at the software not giving preference to reading the received frames.
+
+
+== Decreasing max_snaplen to the minimum required for the test prevented ps_drop ==
+
+In the initial code the max_snaplen configured in PCAP was set to 64KiB which was the value in example code.
+By reducing to the mininum required for the test with the following, ps_drop is no longer incrementing:
+
+$ git diff |cat
+warning: CRLF will be replaced by LF in switch_test_main.c.
+The file will have its original line endings in your working directory.
+diff --git a/switch_test_main.c b/switch_test_main.c
+index ec74526..cec3661 100644
+--- a/switch_test_main.c
++++ b/switch_test_main.c
+@@ -611,8 +611,13 @@ static pcap_t *open_interface (const char *const interface_name)
+         exit (EXIT_FAILURE);
+     }
+     
+-    /* Capture the entire length of the test packets */
+-    const int max_snaplen = 65536;
++    /* Capture the minimum length of the test packets, of which the last field checked is Address which contains the 
++     * sequence number. Uses the offset for the first non-bit field after Address.
++     *
++     * While the transmitted frames contain a test pattern in the data[] this program doesn't verify the test pattern,
++     * on the assumption that any corruption at the link-level will invalidate the CRC and the switches and/or network
++     * adapter will drop the frames with an invalid CRC which the test will then reported as "missed". */
++    const int max_snaplen = offsetof (ethercat_frame_t, IRQ);
+     rc = pcap_set_snaplen (pcap_handle, max_snaplen);
+     if (rc != 0)
+     {
+
+Reasons why this change can help are:
+a. Not all of the received frame data has to be passed from the Kernel to the application.
+b. Depending upon the capture mechanism supported by the Kernel, for a given ring buffer size a smaller snaplen may allow more
+   frames to be stored. From looking at the NPCAP source appears some Linux Kernel capture mechanisms don't allow for the ring
+   buffer to handle variable size frames; with each ring buffer entry having to be sized for the maximum snaplen.
+
+   The actual capture mechanism used hasn't been checked.
+
