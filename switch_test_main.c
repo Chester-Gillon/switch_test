@@ -611,8 +611,13 @@ static pcap_t *open_interface (const char *const interface_name)
         exit (EXIT_FAILURE);
     }
     
-    /* Capture the entire length of the test packets */
-    const int max_snaplen = 65536;
+    /* Capture the minimum length of the test packets, of which the last field checked is Address which contains the 
+     * sequence number. Uses the offset for the first non-bit field after Address.
+     *
+     * While the transmitted frames contain a test pattern in the data[] this program doesn't verify the test pattern,
+     * on the assumption that any corruption at the link-level will invalidate the CRC and the switches and/or network
+     * adapter will drop the frames with an invalid CRC which the test will then reported as "missed". */
+    const int max_snaplen = offsetof (ethercat_frame_t, IRQ);
     rc = pcap_set_snaplen (pcap_handle, max_snaplen);
     if (rc != 0)
     {
