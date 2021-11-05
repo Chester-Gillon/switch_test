@@ -58,11 +58,11 @@ typedef struct
 } port_id_t;
 
 
-/** Define a locally administated MAC address and VLAN for each switch port under test.
+/** Define a locally administated MAC address and VLAN for each possible switch port under test.
     The last octet of the MAC address is the index into the array, which is used an optimisation when looking
     up the port number of a received frame (to avoid having to search the table). */
-#define NUM_TEST_PORTS 24
-static port_id_t test_ports[NUM_TEST_PORTS] =
+#define NUM_DEFINED_PORTS 24
+static const port_id_t test_ports[NUM_DEFINED_PORTS] =
 {
     { .switch_port_number =  1, .mac_addr = {2,0,1,0,0, 0}, .vlan = 1001},
     { .switch_port_number =  2, .mac_addr = {2,0,1,0,0, 1}, .vlan = 1002},
@@ -89,6 +89,12 @@ static port_id_t test_ports[NUM_TEST_PORTS] =
     { .switch_port_number = 23, .mac_addr = {2,0,1,0,0,22}, .vlan = 1023},
     { .switch_port_number = 24, .mac_addr = {2,0,1,0,0,23}, .vlan = 1024},
 };
+
+
+/* Array which defines which of the indices in test_ports[] are tested at run-time.
+ * This allows command line arguments to specify a sub-set of the possible ports to be tested. */
+static uint32_t tested_port_indices[NUM_DEFINED_PORTS];
+static uint32_t num_tested_port_indices;
 
 
 /**
@@ -283,7 +289,7 @@ typedef struct
     /* The counts of different types of frames during the test interval, across all ports tested */
     uint32_t frame_counts[FRAME_RECORD_ARRAY_SIZE];
     /* Receive frame counts, indexed by each [source_port][destination_port] combination */
-    port_frame_statistics_t port_frame_statistics[NUM_TEST_PORTS][NUM_TEST_PORTS];
+    port_frame_statistics_t port_frame_statistics[NUM_DEFINED_PORTS][NUM_DEFINED_PORTS];
     /* Counts the total number of missing frames during the test interval */
     uint32_t total_missing_frames;
     /* The PCAP statistics, which are only sampled at the end of a test iteration if total_missing_frames is non-zero.
@@ -314,12 +320,12 @@ typedef struct
     pcap_t *pcap_handle;
     /* The next sexquence number to be transmitted */
     uint32_t next_tx_sequence_number;
-    /* The next destination ports index to use for a transmitted frame */
-    uint32_t destination_port_index;
-    /* The next modulo offset from destination_port_index to use as the source port index for a transmitted frame */
+    /* The next index into tested_port_indices[] for the next destination port to use for a transmitted frame */
+    uint32_t destination_tested_port_index;
+    /* The next modulo offset from destination_tested_port_index to use as the source port for a transmitted frame */
     uint32_t source_port_offset;
     /* Contains the pending receive frames, indexed by [source_port][destination_port] */
-    pending_rx_frames_t pending_rx_frames[NUM_TEST_PORTS][NUM_TEST_PORTS];
+    pending_rx_frames_t pending_rx_frames[NUM_DEFINED_PORTS][NUM_DEFINED_PORTS];
     /* Used to accumulate the statistics for the current test interval */
     frame_test_statistics_t statistics;
     /* Monotonic time at which the current test interval ends, which is when the statistics are published and then reset */
@@ -443,7 +449,7 @@ static void display_available_interfaces (void)
  */
 static void display_usage (const char *const program_name)
 {
-    printf ("Usage %s: -i <pcap_interface_name> [-t <duration_secs>] [-d]\n", program_name);
+    printf ("Usage %s: -i <pcap_interface_name> [-t <duration_secs>] [-d] [-p <port_list>]\n", program_name);
     printf ("\n");
     printf ("  -i specifies the name of the PCAP interface to send/receive frames on\n");
     display_available_interfaces ();
@@ -453,8 +459,132 @@ static void display_usage (const char *const program_name)
     printf ("\n");
     printf ("  -t defines the duration of a test interval in seconds, over which the number\n");
     printf ("     errors is accumulated and reported.\n");
+    printf ("  -p defines which switch ports to test. The <port_list> is a comma separated\n");
+    printf ("     string, with each item either a single port number or a start and end port\n");
+    printf ("     range delimited by a dash. E.g. 1,4-6 specifies ports 1,4,5,6.\n");
+    printf ("     If not specified defaults to all %u defined ports\n", NUM_DEFINED_PORTS);
     
     exit (EXIT_FAILURE);
+}
+
+
+/**
+ * @brief store one switch port number to be tested
+ * @details Exits with an error port_num fails validation checks
+ * @param[in] port_num The switch port number specified on the command line which is to be tested
+ */
+static void store_tested_port_num (const uint32_t port_num)
+{
+    bool found;
+    uint32_t port_index;
+    
+    /* Check the port number is defined */
+    port_index = 0;
+    found = false;
+    while ((!found) && (port_index < NUM_DEFINED_PORTS))
+    {
+        if (test_ports[port_index].switch_port_number == port_num)
+        {
+            found = true;
+        }
+        else
+        {
+            port_index++;
+        }
+    }
+    if (!found)
+    {
+        printf ("Error: Switch port %" PRIu32 " is not defined in the compiled-in list\n", port_num);
+        exit (EXIT_FAILURE);
+    }
+    
+    /* Check the port number hasn't been specified more than once */
+    for (uint32_t tested_port_index = 0; tested_port_index < num_tested_port_indices; tested_port_index++)
+    {
+        if (test_ports[tested_port_indices[tested_port_index]].switch_port_number == port_num)
+        {
+            printf ("Error: Switch port %" PRIu32 " specified more than once\n", port_num);
+            exit (EXIT_FAILURE);
+        }
+    }
+    
+    tested_port_indices[num_tested_port_indices] = port_index;
+    num_tested_port_indices++;
+}
+
+
+/*
+ * @brief Parse the list of switch ports to be tested, storing in tested_port_indicies[]
+ * @details Exits with an error if the port list isn't valid.
+ * @param[in] tested_port_indicies The string contain the list of ports from the command line
+ */
+static void parse_tested_port_list (const char *const port_list_in)
+{
+    const char *const ports_delim = ",";
+    const char *const range_delim = "-";
+    char *const port_list = strdup (port_list_in);
+    char *port_list_saveptr = NULL;
+    char *port_range_saveptr = NULL;
+    char *port_list_token;
+    char *port_range_token;
+    uint32_t port_num;
+    char junk;
+    uint32_t range_start_port_num;
+    uint32_t range_end_port_num;
+    
+    /* Process the list of comma separated port numbers */
+    num_tested_port_indices = 0;
+    port_list_token = strtok_r (port_list, ports_delim, &port_list_saveptr);
+    while (port_list_token != NULL)
+    {
+        /* For each comma separated item extract as either a single port number, or a range of consecutive port numbers
+         * separated by a dash. */
+        port_range_token = strtok_r (port_list_token, range_delim, &port_range_saveptr);
+        if (sscanf (port_range_token, "%" SCNu32 "%c", &port_num, &junk) != 1)
+        {
+            printf ("Error: %s is not a valid port number\n", port_range_token);
+            exit (EXIT_FAILURE);
+        }
+        range_start_port_num = port_num;
+        
+        port_range_token = strtok_r (NULL, range_delim, &port_range_saveptr);
+        if (port_range_token != NULL)
+        {
+            /* A range of port numbers specified */
+            if (sscanf (port_range_token, "%" SCNu32 "%c", &port_num, &junk) != 1)
+            {
+                printf ("Error: %s is not a valid port number\n", port_range_token);
+                exit (EXIT_FAILURE);
+            }
+            range_end_port_num = port_num;
+            
+            port_range_token = strtok_r (NULL, range_delim, &port_range_saveptr);
+            if (port_range_token != NULL)
+            {
+                printf ("Error: %s unexpected spurious port range\n", port_range_token);
+                exit (EXIT_FAILURE);
+            }
+            
+            if (range_end_port_num < range_start_port_num)
+            {
+                printf ("Error: port range end %" PRIu32 " is less than port range start %" PRIu32 "\n",
+                        range_end_port_num, range_start_port_num);
+                exit (EXIT_FAILURE);
+            }
+        }
+        else
+        {
+            /* A single port number specified */
+            range_end_port_num = port_num;
+        }
+        
+        for (port_num = range_start_port_num; port_num <= range_end_port_num; port_num++)
+        {
+            store_tested_port_num (port_num);
+        }
+        
+        port_list_token = strtok_r (NULL, ports_delim, &port_list_saveptr);
+    }
 }
 
 
@@ -465,11 +595,20 @@ static void display_usage (const char *const program_name)
 static void read_command_line_arguments (const int argc, char *argv[])
 {
     const char *const program_name = argv[0];
-    const char *const optstring = "i:dt:";
+    const char *const optstring = "i:dt:p:";
     bool pcap_interface_specified = false;
     int option;
     char junk;
     
+    /* Default to testing all defined switch ports */
+    num_tested_port_indices = 0;
+    for (uint32_t port_index = 0; port_index < NUM_DEFINED_PORTS; port_index++)
+    {
+        tested_port_indices[num_tested_port_indices] = port_index;
+        num_tested_port_indices++;
+    }
+
+    /* Process the command line arguments */
     option = getopt (argc, argv, optstring);
     while (option != -1)
     {
@@ -489,7 +628,12 @@ static void read_command_line_arguments (const int argc, char *argv[])
                 (arg_test_interval_secs <= 0))
             {
                 printf ("Error: Invalid <duration_secs> %s\n", optarg);
+                exit (EXIT_FAILURE);
             }
+            break;
+            
+        case 'p':
+            parse_tested_port_list (optarg);
             break;
             
         case '?':
@@ -501,9 +645,16 @@ static void read_command_line_arguments (const int argc, char *argv[])
         option = getopt (argc, argv, optstring);
     }
     
+    /* Check the expected arguments have been provided */
     if (!pcap_interface_specified)
     {
         printf ("Error: The PCAP interface must be specified\n\n");
+        display_usage (program_name);
+    }
+    
+    if (num_tested_port_indices < 2)
+    {
+        printf ("Error: A minimum of two ports must be tested\n\n");
         display_usage (program_name);
     }
 }
@@ -769,9 +920,9 @@ static void reset_frame_test_statistics (frame_test_statistics_t *const statisti
         statistics->frame_counts[frame_type] = 0;
     }
     statistics->total_missing_frames = 0;
-    for (uint32_t source_port_index = 0; source_port_index < NUM_TEST_PORTS; source_port_index++)
+    for (uint32_t source_port_index = 0; source_port_index < NUM_DEFINED_PORTS; source_port_index++)
     {
-        for (uint32_t destination_port_index = 0; destination_port_index < NUM_TEST_PORTS; destination_port_index++)
+        for (uint32_t destination_port_index = 0; destination_port_index < NUM_DEFINED_PORTS; destination_port_index++)
         {
             port_frame_statistics_t *const port_stats =
                     &statistics->port_frame_statistics[source_port_index][destination_port_index];
@@ -792,11 +943,11 @@ static void transmit_receive_initialise (frame_tx_rx_thread_context_t *const con
 {
     context->pcap_handle = open_interface (arg_pcap_interface_name);
     context->next_tx_sequence_number = 1;
-    context->destination_port_index = 0;
+    context->destination_tested_port_index = 0;
     context->source_port_offset = 1;
-    for (uint32_t source_port_index = 0; source_port_index < NUM_TEST_PORTS; source_port_index++)
+    for (uint32_t source_port_index = 0; source_port_index < NUM_DEFINED_PORTS; source_port_index++)
     {
-        for (uint32_t destination_port_index = 0; destination_port_index < NUM_TEST_PORTS; destination_port_index++)
+        for (uint32_t destination_port_index = 0; destination_port_index < NUM_DEFINED_PORTS; destination_port_index++)
         {
             pending_rx_frames_t *const pending = &context->pending_rx_frames[source_port_index][destination_port_index];
             
@@ -842,7 +993,7 @@ static bool get_port_index_from_mac_addr (const uint8_t *const mac_addr, uint32_
     bool port_index_valid;
     
     *port_index = mac_addr[5];
-    port_index_valid = (*port_index < NUM_TEST_PORTS);
+    port_index_valid = (*port_index < NUM_DEFINED_PORTS);
     
     if (port_index_valid)
     {
@@ -1008,19 +1159,22 @@ static void handle_pending_rx_frame (frame_tx_rx_thread_context_t *const context
 /*
  * @brief Sequence transmitting the next test frame, cycling around combinations of the source and destination ports
  * @details This also records the frame as pending receipt, identified with the combination of source/destination port
- *          and sequence nunmber.
+ *          and sequence number.
  * @param[in/out] context Context used transmitting frames.
  */
 static void transmit_next_test_frame (frame_tx_rx_thread_context_t *const context)
 {
     int rc;
-    const uint32_t source_port_index = (context->destination_port_index + context->source_port_offset) % NUM_TEST_PORTS;
-    pending_rx_frames_t *const pending = &context->pending_rx_frames[source_port_index][context->destination_port_index];
+    const uint32_t source_tested_port_index = 
+            (context->destination_tested_port_index + context->source_port_offset) % num_tested_port_indices;
+    const uint32_t destination_port_index = tested_port_indices[context->destination_tested_port_index];
+    const uint32_t source_port_index = tested_port_indices[source_tested_port_index];
+    pending_rx_frames_t *const pending = &context->pending_rx_frames[source_port_index][destination_port_index];
     port_frame_statistics_t *const port_stats =
-            &context->statistics.port_frame_statistics[source_port_index][context->destination_port_index];
+            &context->statistics.port_frame_statistics[source_port_index][destination_port_index];
 
     /* Create the test frame and transmit it */
-    create_test_frame (&context->tx_frame, source_port_index, context->destination_port_index, context->next_tx_sequence_number);
+    create_test_frame (&context->tx_frame, source_port_index, destination_port_index, context->next_tx_sequence_number);
     rc = pcap_sendpacket (context->pcap_handle, (const u_char *) &context->tx_frame, sizeof (context->tx_frame));
     if (rc != 0)
     {
@@ -1063,11 +1217,11 @@ static void transmit_next_test_frame (frame_tx_rx_thread_context_t *const contex
 
     /* Advance to the next frame which will be transmitted */
     context->next_tx_sequence_number++;
-    context->destination_port_index = (context->destination_port_index + 1) % NUM_TEST_PORTS;
-    if (context->destination_port_index == 0)
+    context->destination_tested_port_index = (context->destination_tested_port_index + 1) % num_tested_port_indices;
+    if (context->destination_tested_port_index == 0)
     {
         context->source_port_offset++;
-        if (context->source_port_offset == NUM_TEST_PORTS)
+        if (context->source_port_offset == num_tested_port_indices)
         {
             context->source_port_offset = 1;
         }
@@ -1244,8 +1398,8 @@ static void write_frame_debug_csv_file (const char *const frame_debug_csv_filena
 static void write_frame_test_statistics (results_summary_t *const results_summary,
                                          const frame_test_statistics_t *const statistics)
 {
-    uint32_t source_port_index;
-    uint32_t destination_port_index;
+    uint32_t source_tested_port_index;
+    uint32_t destination_tested_port_index;
     char time_str[80];
     struct tm broken_down_time;
     struct timeval tod;
@@ -1292,21 +1446,29 @@ static void write_frame_test_statistics (results_summary_t *const results_summar
     for (uint32_t header_row = 0; header_row < 2; header_row++)
     {
         console_printf ("%s", (header_row == 0) ? "  port  " : "        ");
-        for (destination_port_index = 0; destination_port_index < NUM_TEST_PORTS; destination_port_index++)
+        for (destination_tested_port_index = 0;
+             destination_tested_port_index < num_tested_port_indices;
+             destination_tested_port_index++)
         {
             char port_num_text[3];
             
-            snprintf (port_num_text, sizeof (port_num_text), "%2" PRIu32, test_ports[destination_port_index].switch_port_number);
+            snprintf (port_num_text, sizeof (port_num_text), "%2" PRIu32, 
+                    test_ports[tested_port_indices[destination_tested_port_index]].switch_port_number);
             console_printf ("%c", port_num_text[header_row]);
         }
         console_printf ("\n");
     }
 
-    for (source_port_index = 0; source_port_index < NUM_TEST_PORTS; source_port_index++)
+    for (source_tested_port_index = 0; source_tested_port_index < num_tested_port_indices; source_tested_port_index++)
     {
+        const uint32_t source_port_index = tested_port_indices[source_tested_port_index];
+
         console_printf ("    %2" PRIu32 "  ", test_ports[source_port_index].switch_port_number);
-        for (destination_port_index = 0; destination_port_index < NUM_TEST_PORTS; destination_port_index++)
+        for (destination_tested_port_index = 0;
+             destination_tested_port_index < num_tested_port_indices;
+             destination_tested_port_index++)
         {
+            const uint32_t destination_port_index = tested_port_indices[destination_tested_port_index];
             const port_frame_statistics_t *const port_statistics =
                     &statistics->port_frame_statistics[source_port_index][destination_port_index];
             char port_status;
@@ -1355,12 +1517,16 @@ static void write_frame_test_statistics (results_summary_t *const results_summar
     }
     
     /* Write one row containing the number of frames per combination of source and destination switch ports tested */
-    for (source_port_index = 0; source_port_index < NUM_TEST_PORTS; source_port_index++)
+    for (source_tested_port_index = 0; source_tested_port_index < num_tested_port_indices; source_tested_port_index++)
     {
-        for (destination_port_index = 0; destination_port_index < NUM_TEST_PORTS; destination_port_index++)
+        for (destination_tested_port_index = 0;
+             destination_tested_port_index < num_tested_port_indices;
+             destination_tested_port_index++)
         {
-            if (source_port_index != destination_port_index)
+            if (source_tested_port_index != destination_tested_port_index)
             {
+                const uint32_t source_port_index = tested_port_indices[source_tested_port_index];
+                const uint32_t destination_port_index = tested_port_indices[destination_tested_port_index];
                 const port_frame_statistics_t *const port_statistics =
                         &statistics->port_frame_statistics[source_port_index][destination_port_index];
                 
