@@ -1,0 +1,454 @@
+The following shows the config which was used for the DES-3526 as an injection switch to test
+24 100M ports on a switch under test.
+
+On the injection switch:
+- 100M Ports 1 to 24 connected to the switch under test.
+- 1G port 25 connected to the PC running the switch_test program.
+
+The important settings are:
+a. "disable stp" which globally disables Spanning Tree Protocol. This is necessary as the injection
+   switch is being used to emulate 24 edge ports on the switch under test, and need to disable STP
+   to prevent the ports between the switches being shutdown by BPDU messages. With each injection switch
+   port connected to the switch under test being in a different VLAN should avoid loops between the
+   switches.
+b. The "config vlan" commands which added VLANs 1001 .. 1024 in which was:
+   - A tagged member of port 25
+   - An untagged member of one port 1 .. 24 (corresponding to VLANs 1001 .. 1024)
+
+
+DES-3526:4#show config config_in_nvram
+Command: show config config_in_nvram
+
+#-------------------------------------------------------------------
+#                       DES-3526 Configuration
+#
+#                       Firmware: Build 4.01-B19
+#        Copyright(C) 2000-2005 D-Link Corporation. All rights reserved.
+#-------------------------------------------------------------------
+
+
+# BASIC
+
+config serial_port baud_rate 115200 auto_logout never
+enable telnet 23
+enable web 80
+config cli_line default
+
+# STORM
+
+config traffic control_trap none
+config traffic control 1-5 broadcast disable multicast disable dlf disable  action drop threshold 128000
+
+# GM
+
+config sim candidate
+disable sim
+config sim dp_interval 30
+config sim hold_time 100
+
+# GM_H [H]
+
+
+# SYSLOG
+
+disable syslog
+config system_severity trap information
+config system_severity log information
+
+# QOS
+
+config scheduling 0 max_packet 0 max_latency 0
+config scheduling 1 max_packet 0 max_latency 0
+config scheduling 2 max_packet 0 max_latency 0
+config scheduling 3 max_packet 0 max_latency 0
+config 802.1p user_priority 0  1
+config 802.1p user_priority 1  0
+config 802.1p user_priority 2  0
+config 802.1p user_priority 3  1
+config 802.1p user_priority 4  2
+config 802.1p user_priority 5  2
+config 802.1p user_priority 6  3
+config 802.1p user_priority 7  3
+config 802.1p default_priority 1-26 0
+config bandwidth_control 1-26 rx_rate no_limit tx_rate no_limit
+
+# MIRROR
+
+disable mirror
+
+# TRAF-SEGMENTATION
+
+config traffic_segmentation 1-26 forward_list 1-26
+
+# PORT
+
+config ports 1-26 speed auto flow_control disable learning enable state enable
+
+# PORT_LOCK
+
+disable port_security trap_log
+config port_security ports 1-26 admin_state disable max_learning_addr 1 lock_address_mode DeleteOnReset
+
+# 8021X
+
+disable 802.1x
+config 802.1x auth_protocol radius_eap
+config 802.1x capability ports 1-26 none
+config 802.1x auth_parameter ports 1-26 direction both port_control auto quiet_period 60 tx_period 30 supp_timeout 30 server_timeout 30 max_req 2 reauth_period 3600 enable_reauth disable
+
+# SNMPv3
+
+delete snmp community public
+delete snmp community private
+delete snmp user initial
+delete snmp group initial
+delete snmp view restricted all
+delete snmp view CommunityView all
+config snmp engineID 800000ab03000f3dcde17f
+create snmp view restricted 1.3.6.1.2.1.1 view_type included
+create snmp view restricted 1.3.6.1.2.1.11 view_type included
+create snmp view restricted 1.3.6.1.6.3.10.2.1 view_type included
+create snmp view restricted 1.3.6.1.6.3.11.2.1 view_type included
+create snmp view restricted 1.3.6.1.6.3.15.1.1 view_type included
+create snmp view CommunityView 1 view_type included
+create snmp view CommunityView 1.3.6.1.6.3 view_type excluded
+create snmp view CommunityView 1.3.6.1.6.3.1 view_type included
+create snmp group public v1 read_view CommunityView notify_view CommunityView
+create snmp group public v2c read_view CommunityView notify_view CommunityView
+create snmp group initial v3  noauth_nopriv read_view restricted notify_view restricted
+create snmp group private v1 read_view CommunityView write_view CommunityView notify_view CommunityView
+create snmp group private v2c read_view CommunityView write_view CommunityView notify_view CommunityView
+create snmp group ReadGroup v1 read_view CommunityView notify_view CommunityView
+create snmp group ReadGroup v2c read_view CommunityView notify_view CommunityView
+create snmp group WriteGroup v1 read_view CommunityView write_view CommunityView notify_view CommunityView
+create snmp group WriteGroup v2c read_view CommunityView write_view CommunityView notify_view CommunityView
+create snmp community private view CommunityView read_write
+create snmp community public view CommunityView read_only
+create snmp user initial initial
+
+# SNMPv3User [H]
+
+config snmp engine reboot 5
+
+# MANAGEMENT
+
+enable snmp traps
+enable snmp authenticate traps
+disable rmon
+
+# VLAN
+
+disable asymmetric_vlan
+config vlan default delete 1-26
+config vlan default add untagged 25-26
+config vlan default advertisement enable
+create vlan port1 tag 1001
+config vlan port1 add tagged 25
+config vlan port1 add untagged 1
+config vlan port1 advertisement disable
+create vlan port2 tag 1002
+config vlan port2 add tagged 25
+config vlan port2 add untagged 2
+config vlan port2 advertisement disable
+create vlan port3 tag 1003
+config vlan port3 add tagged 25
+config vlan port3 add untagged 3
+config vlan port3 advertisement disable
+create vlan port4 tag 1004
+config vlan port4 add tagged 25
+config vlan port4 add untagged 4
+config vlan port4 advertisement disable
+create vlan port5 tag 1005
+config vlan port5 add tagged 25
+config vlan port5 add untagged 5
+config vlan port5 advertisement disable
+create vlan port6 tag 1006
+config vlan port6 add tagged 25
+config vlan port6 add untagged 6
+config vlan port6 advertisement disable
+create vlan port7 tag 1007
+config vlan port7 add tagged 25
+config vlan port7 add untagged 7
+config vlan port7 advertisement disable
+create vlan port8 tag 1008
+config vlan port8 add tagged 25
+config vlan port8 add untagged 8
+config vlan port8 advertisement disable
+create vlan port9 tag 1009
+config vlan port9 add tagged 25
+config vlan port9 add untagged 9
+config vlan port9 advertisement disable
+create vlan port10 tag 1010
+config vlan port10 add tagged 25
+config vlan port10 add untagged 10
+config vlan port10 advertisement disable
+create vlan port11 tag 1011
+config vlan port11 add tagged 25
+config vlan port11 add untagged 11
+config vlan port11 advertisement disable
+create vlan port12 tag 1012
+config vlan port12 add tagged 25
+config vlan port12 add untagged 12
+config vlan port12 advertisement disable
+create vlan port13 tag 1013
+config vlan port13 add tagged 25
+config vlan port13 add untagged 13
+config vlan port13 advertisement disable
+create vlan port14 tag 1014
+config vlan port14 add tagged 25
+config vlan port14 add untagged 14
+config vlan port14 advertisement disable
+create vlan port15 tag 1015
+config vlan port15 add tagged 25
+config vlan port15 add untagged 15
+config vlan port15 advertisement disable
+create vlan port16 tag 1016
+config vlan port16 add tagged 25
+config vlan port16 add untagged 16
+config vlan port16 advertisement disable
+create vlan port17 tag 1017
+config vlan port17 add tagged 25
+config vlan port17 add untagged 17
+config vlan port17 advertisement disable
+create vlan port18 tag 1018
+config vlan port18 add tagged 25
+config vlan port18 add untagged 18
+config vlan port18 advertisement disable
+create vlan port19 tag 1019
+config vlan port19 add tagged 25
+config vlan port19 add untagged 19
+config vlan port19 advertisement disable
+create vlan port20 tag 1020
+config vlan port20 add tagged 25
+config vlan port20 add untagged 20
+config vlan port20 advertisement disable
+create vlan port21 tag 1021
+config vlan port21 add tagged 25
+config vlan port21 add untagged 21
+config vlan port21 advertisement disable
+create vlan port22 tag 1022
+config vlan port22 add tagged 25
+config vlan port22 add untagged 22
+config vlan port22 advertisement disable
+create vlan port23 tag 1023
+config vlan port23 add tagged 25
+config vlan port23 add untagged 23
+config vlan port23 advertisement disable
+create vlan port24 tag 1024
+config vlan port24 add tagged 25
+config vlan port24 add untagged 24
+config vlan port24 advertisement disable
+disable gvrp
+config gvrp 1 state disable ingress_checking enable acceptable_frame admit_all pvid 1001
+config gvrp 2 state disable ingress_checking enable acceptable_frame admit_all pvid 1002
+config gvrp 3 state disable ingress_checking enable acceptable_frame admit_all pvid 1003
+config gvrp 4 state disable ingress_checking enable acceptable_frame admit_all pvid 1004
+config gvrp 5 state disable ingress_checking enable acceptable_frame admit_all pvid 1005
+config gvrp 6 state disable ingress_checking enable acceptable_frame admit_all pvid 1006
+config gvrp 7 state disable ingress_checking enable acceptable_frame admit_all pvid 1007
+config gvrp 8 state disable ingress_checking enable acceptable_frame admit_all pvid 1008
+config gvrp 9 state disable ingress_checking enable acceptable_frame admit_all pvid 1009
+config gvrp 10 state disable ingress_checking enable acceptable_frame admit_all pvid 1010
+config gvrp 11 state disable ingress_checking enable acceptable_frame admit_all pvid 1011
+config gvrp 12 state disable ingress_checking enable acceptable_frame admit_all pvid 1012
+config gvrp 13 state disable ingress_checking enable acceptable_frame admit_all pvid 1013
+config gvrp 14 state disable ingress_checking enable acceptable_frame admit_all pvid 1014
+config gvrp 15 state disable ingress_checking enable acceptable_frame admit_all pvid 1015
+config gvrp 16 state disable ingress_checking enable acceptable_frame admit_all pvid 1016
+config gvrp 17 state disable ingress_checking enable acceptable_frame admit_all pvid 1017
+config gvrp 18 state disable ingress_checking enable acceptable_frame admit_all pvid 1018
+config gvrp 19 state disable ingress_checking enable acceptable_frame admit_all pvid 1019
+config gvrp 20 state disable ingress_checking enable acceptable_frame admit_all pvid 1020
+config gvrp 21 state disable ingress_checking enable acceptable_frame admit_all pvid 1021
+config gvrp 22 state disable ingress_checking enable acceptable_frame admit_all pvid 1022
+config gvrp 23 state disable ingress_checking enable acceptable_frame admit_all pvid 1023
+config gvrp 24 state disable ingress_checking enable acceptable_frame admit_all pvid 1024
+config gvrp 25-26 state disable ingress_checking enable acceptable_frame admit_all pvid 1
+
+# FDB
+
+config fdb aging_time 300
+config multicast port_filtering_mode 1-26 forward_unregistered_groups
+
+# MAC_ADDRESS_TABLE_NOTIFICATION
+
+config mac_notification interval 1 historysize 1
+disable mac_notification
+config mac_notification ports 1-26 disable
+
+# STP
+
+config stp maxage 20 maxhops 20 forwarddelay 15 txholdcount 3 fbpdu enable
+config stp version rstp
+config stp priority 32768 instance_id 0
+config stp hellotime 2
+config stp lbd enable
+config stp lbd_recover_timer 60
+config stp mst_config_id name 00:0F:3D:CD:E1:7F revision_level 0
+disable stp
+config stp ports 1-26 externalCost auto edge false p2p auto state enable
+config stp ports 1-26 lbd disable
+config stp mst_ports 1-26 instance_id 0 internalCost auto priority 128
+config stp ports 1-26 fbpdu disable
+
+# SSH
+
+config ssh server maxsession 8
+config ssh server contimeout 300
+config ssh server authfail 2
+config ssh server rekey never
+disable ssh
+
+# SSL
+
+disable ssl
+enable ssl ciphersuite RSA_with_RC4_128_MD5
+enable ssl ciphersuite RSA_with_3DES_EDE_CBC_SHA
+enable ssl ciphersuite DHE_DSS_with_3DES_EDE_CBC_SHA
+enable ssl ciphersuite RSA_EXPORT_with_RC4_40_MD5
+config ssl cachetimeout timeout 600
+
+# SAFE_GUARD
+
+config safeguard_engine state disable cpu_utilization rising_threshold 100 falling_threshold 20 trap_log disable
+
+# ACL
+disable cpu_interface_filtering
+
+# SNTP
+
+disable sntp
+config time_zone operator - hour 6 min 0
+config sntp primary 0.0.0.0 secondary 0.0.0.0 poll-interval 720
+config dst disable
+
+# IPBIND
+disable address_binding acl_mode
+disable address_binding trap_log
+
+
+# ROUTE
+
+
+# LACP
+
+config link_aggregation algorithm mac_source
+config lacp_port 1-26 mode passive
+
+# IP
+
+config ipif System vlan default ipaddress 192.168.0.90/24 state enable
+disable autoconfig
+
+# ARP
+
+config arp_aging time 20
+
+# SNOOP
+
+disable igmp_snooping
+config igmp_snooping default host_timeout 260 router_timeout 260 leave_timer 2 state disable
+config igmp_snooping querier default query_interval 125 max_response_time 10 robustness_variable 2
+config igmp_snooping querier default last_member_query_interval 1 state disable
+config igmp_snooping port1 host_timeout 260 router_timeout 260 leave_timer 2 state disable
+config igmp_snooping querier port1 query_interval 125 max_response_time 10 robustness_variable 2
+config igmp_snooping querier port1 last_member_query_interval 1 state disable
+config igmp_snooping port2 host_timeout 260 router_timeout 260 leave_timer 2 state disable
+config igmp_snooping querier port2 query_interval 125 max_response_time 10 robustness_variable 2
+config igmp_snooping querier port2 last_member_query_interval 1 state disable
+config igmp_snooping port3 host_timeout 260 router_timeout 260 leave_timer 2 state disable
+config igmp_snooping querier port3 query_interval 125 max_response_time 10 robustness_variable 2
+config igmp_snooping querier port3 last_member_query_interval 1 state disable
+config igmp_snooping port4 host_timeout 260 router_timeout 260 leave_timer 2 state disable
+config igmp_snooping querier port4 query_interval 125 max_response_time 10 robustness_variable 2
+config igmp_snooping querier port4 last_member_query_interval 1 state disable
+config igmp_snooping port5 host_timeout 260 router_timeout 260 leave_timer 2 state disable
+config igmp_snooping querier port5 query_interval 125 max_response_time 10 robustness_variable 2
+config igmp_snooping querier port5 last_member_query_interval 1 state disable
+config igmp_snooping port6 host_timeout 260 router_timeout 260 leave_timer 2 state disable
+config igmp_snooping querier port6 query_interval 125 max_response_time 10 robustness_variable 2
+config igmp_snooping querier port6 last_member_query_interval 1 state disable
+config igmp_snooping port7 host_timeout 260 router_timeout 260 leave_timer 2 state disable
+config igmp_snooping querier port7 query_interval 125 max_response_time 10 robustness_variable 2
+config igmp_snooping querier port7 last_member_query_interval 1 state disable
+config igmp_snooping port8 host_timeout 260 router_timeout 260 leave_timer 2 state disable
+config igmp_snooping querier port8 query_interval 125 max_response_time 10 robustness_variable 2
+config igmp_snooping querier port8 last_member_query_interval 1 state disable
+config igmp_snooping port9 host_timeout 260 router_timeout 260 leave_timer 2 state disable
+config igmp_snooping querier port9 query_interval 125 max_response_time 10 robustness_variable 2
+config igmp_snooping querier port9 last_member_query_interval 1 state disable
+config igmp_snooping port10 host_timeout 260 router_timeout 260 leave_timer 2 state disable
+config igmp_snooping querier port10 query_interval 125 max_response_time 10 robustness_variable 2
+config igmp_snooping querier port10 last_member_query_interval 1 state disable
+config igmp_snooping port11 host_timeout 260 router_timeout 260 leave_timer 2 state disable
+config igmp_snooping querier port11 query_interval 125 max_response_time 10 robustness_variable 2
+config igmp_snooping querier port11 last_member_query_interval 1 state disable
+config igmp_snooping port12 host_timeout 260 router_timeout 260 leave_timer 2 state disable
+config igmp_snooping querier port12 query_interval 125 max_response_time 10 robustness_variable 2
+config igmp_snooping querier port12 last_member_query_interval 1 state disable
+config igmp_snooping port13 host_timeout 260 router_timeout 260 leave_timer 2 state disable
+config igmp_snooping querier port13 query_interval 125 max_response_time 10 robustness_variable 2
+config igmp_snooping querier port13 last_member_query_interval 1 state disable
+config igmp_snooping port14 host_timeout 260 router_timeout 260 leave_timer 2 state disable
+config igmp_snooping querier port14 query_interval 125 max_response_time 10 robustness_variable 2
+config igmp_snooping querier port14 last_member_query_interval 1 state disable
+config igmp_snooping port15 host_timeout 260 router_timeout 260 leave_timer 2 state disable
+config igmp_snooping querier port15 query_interval 125 max_response_time 10 robustness_variable 2
+config igmp_snooping querier port15 last_member_query_interval 1 state disable
+config igmp_snooping port16 host_timeout 260 router_timeout 260 leave_timer 2 state disable
+config igmp_snooping querier port16 query_interval 125 max_response_time 10 robustness_variable 2
+config igmp_snooping querier port16 last_member_query_interval 1 state disable
+config igmp_snooping port17 host_timeout 260 router_timeout 260 leave_timer 2 state disable
+config igmp_snooping querier port17 query_interval 125 max_response_time 10 robustness_variable 2
+config igmp_snooping querier port17 last_member_query_interval 1 state disable
+config igmp_snooping port18 host_timeout 260 router_timeout 260 leave_timer 2 state disable
+config igmp_snooping querier port18 query_interval 125 max_response_time 10 robustness_variable 2
+config igmp_snooping querier port18 last_member_query_interval 1 state disable
+config igmp_snooping port19 host_timeout 260 router_timeout 260 leave_timer 2 state disable
+config igmp_snooping querier port19 query_interval 125 max_response_time 10 robustness_variable 2
+config igmp_snooping querier port19 last_member_query_interval 1 state disable
+config igmp_snooping port20 host_timeout 260 router_timeout 260 leave_timer 2 state disable
+config igmp_snooping querier port20 query_interval 125 max_response_time 10 robustness_variable 2
+config igmp_snooping querier port20 last_member_query_interval 1 state disable
+config igmp_snooping port21 host_timeout 260 router_timeout 260 leave_timer 2 state disable
+config igmp_snooping querier port21 query_interval 125 max_response_time 10 robustness_variable 2
+config igmp_snooping querier port21 last_member_query_interval 1 state disable
+config igmp_snooping port22 host_timeout 260 router_timeout 260 leave_timer 2 state disable
+config igmp_snooping querier port22 query_interval 125 max_response_time 10 robustness_variable 2
+config igmp_snooping querier port22 last_member_query_interval 1 state disable
+config igmp_snooping port23 host_timeout 260 router_timeout 260 leave_timer 2 state disable
+config igmp_snooping querier port23 query_interval 125 max_response_time 10 robustness_variable 2
+config igmp_snooping querier port23 last_member_query_interval 1 state disable
+config igmp_snooping port24 host_timeout 260 router_timeout 260 leave_timer 2 state disable
+config igmp_snooping querier port24 query_interval 125 max_response_time 10 robustness_variable 2
+config igmp_snooping querier port24 last_member_query_interval 1 state disable
+
+# ACCESS_AUTHENTICATION_CONTROL
+
+config authen_login default method local
+config authen_enable default method local_enable
+config authen application console login default
+config authen application console enable default
+config authen application telnet login default
+config authen application telnet enable default
+config authen application ssh login default
+config authen application ssh enable default
+config authen application http login default
+config authen application http enable default
+config authen parameter response_timeout 30
+config authen parameter attempt 3
+disable authen_policy
+
+# DHCP_RELAY
+
+disable dhcp_relay
+config dhcp_relay hops 4 time 0
+config dhcp_relay option_82 state disable
+config dhcp_relay option_82 check disable
+config dhcp_relay option_82 policy replace
+
+#-------------------------------------------------------------------
+#             End of configuration file for DES-3526
+#-------------------------------------------------------------------
+
+DES-3526:4#
