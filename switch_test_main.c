@@ -657,6 +657,12 @@ static void read_command_line_arguments (const int argc, char *argv[])
         printf ("Error: A minimum of two ports must be tested\n\n");
         display_usage (program_name);
     }
+    
+    if (optind < argc)
+    {
+        printf ("Error: Unexpected nonoption (first %s)\n\n", argv[optind]);
+        display_usage (program_name);
+    }
 }
 
 
