@@ -254,6 +254,11 @@ static char arg_pcap_interface_name[PATH_MAX];
 static int64_t arg_test_interval_secs = 10;
 
 
+/* Command line argument which specifies the maximum rate at which transmit frames can be sent.
+ * If <= 0 then no maximum rate is applied, i.e. transmits as quickly as possible. */
+static int64_t arg_max_frame_rate_hz = -1;
+
+
 /* Command line argument which controls how the test runs:
  * - When false the test runs until requested to stop, and only reports summary information for each test interval.
  * - When true the test runs for a single test interval, recording the transmitted/received frames in memory which are written 
@@ -358,6 +363,20 @@ typedef struct
     frame_records_t frame_recording;
     /* Used to populate the next frame to be transmitted */
     ethercat_frame_t tx_frame;
+    /* Controls the rate at which transmit frames are generated:
+     * - When true a timer is used to limit the maximum rate at which frames are transmitted.
+     *   This can be used when the available bandwidth on the link to the injection switch exceeds that available to distribute
+     *   the total bandwidth across all ports in the switch under test.
+     *
+     *   E.g. if the link to the injection switch is 1G and the links to the switch under test are 100M, then if less thsn 10
+     *   9 ports are tested then need to rate limit the transmission.
+     *
+     * - When false frames are transmitted as quickly as possible. */
+    bool tx_rate_limited;
+    /* When tx_rate_limited is true, the monotonic time between each frame transmitted */
+    int64_t tx_interval;
+    /* When tx_rate_limited is true, the monotonic time at which to transmit the next frame */
+    int64_t tx_time_of_next_frame;
 } frame_tx_rx_thread_context_t;
 
 
@@ -473,7 +492,7 @@ static void display_available_interfaces (void)
  */
 static void display_usage (const char *const program_name)
 {
-    printf ("Usage %s: -i <pcap_interface_name> [-t <duration_secs>] [-d] [-p <port_list>]\n", program_name);
+    printf ("Usage %s: -i <pcap_interface_name> [-t <duration_secs>] [-d] [-p <port_list>] [-r <rate_hz>]\n", program_name);
     printf ("\n");
     printf ("  -i specifies the name of the PCAP interface to send/receive frames on\n");
     display_available_interfaces ();
@@ -487,6 +506,7 @@ static void display_usage (const char *const program_name)
     printf ("     string, with each item either a single port number or a start and end port\n");
     printf ("     range delimited by a dash. E.g. 1,4-6 specifies ports 1,4,5,6.\n");
     printf ("     If not specified defaults to all %u defined ports\n", NUM_DEFINED_PORTS);
+    printf ("  -r specifies the maximum rate at which frames are transmitted\n");
     
     exit (EXIT_FAILURE);
 }
@@ -619,7 +639,7 @@ static void parse_tested_port_list (const char *const port_list_in)
 static void read_command_line_arguments (const int argc, char *argv[])
 {
     const char *const program_name = argv[0];
-    const char *const optstring = "i:dt:p:";
+    const char *const optstring = "i:dt:p:r:";
     bool pcap_interface_specified = false;
     int option;
     char junk;
@@ -658,6 +678,14 @@ static void read_command_line_arguments (const int argc, char *argv[])
             
         case 'p':
             parse_tested_port_list (optarg);
+            break;
+            
+        case 'r':
+            if (sscanf (optarg, "%" SCNi64 "%c", &arg_max_frame_rate_hz, &junk) != 1)
+            {
+                printf ("Error: Invalid <rate_hz> %s\n", optarg);
+                exit (EXIT_FAILURE);
+            }
             break;
             
         case '?':
@@ -1008,6 +1036,13 @@ static void transmit_receive_initialise (frame_tx_rx_thread_context_t *const con
     const int64_t now = get_monotonic_time ();
     context->statistics.interval_start_time = now;
     context->test_interval_end_time = now + (arg_test_interval_secs * NSECS_PER_SEC);
+    
+    context->tx_rate_limited = arg_max_frame_rate_hz > 0;
+    if (context->tx_rate_limited)
+    {
+        context->tx_interval = NSECS_PER_SEC / arg_max_frame_rate_hz;
+        context->tx_time_of_next_frame = now;
+    }
 }
 
 
@@ -1301,9 +1336,16 @@ static void *transmit_receive_thread (void *arg)
             context->statistics.frame_counts[frame_record.frame_type]++;
             record_frame_for_debug (context, &frame_record);
         }
-        else
+        else if (!context->tx_rate_limited)
         {
+            /* Transmit frames as quickly as possible */
             transmit_next_test_frame (context);
+        }
+        else if (now >= context->tx_time_of_next_frame)
+        {
+            /* Transmit frames, with the rate limited to a maximum */
+            transmit_next_test_frame (context);
+            context->tx_time_of_next_frame += context->tx_interval;
         }
         
         if (now > context->test_interval_end_time)
@@ -1471,7 +1513,7 @@ static void write_frame_test_statistics (results_summary_t *const results_summar
             (double) statistics->frame_counts[FRAME_RECORD_TX_TEST_FRAME] / statistics_interval_secs);
     
     /* Display summary of missed frames over combination of source / destination ports */
-    console_printf ("\nSummary of missed frames : '.' none missed 'S' some missed 'A' all misssed\n");
+    console_printf ("\nSummary of missed frames : '.' none missed 'S' some missed 'A' all missed\n");
     console_printf ("Source  Destination ports --->\n");
     for (uint32_t header_row = 0; header_row < 2; header_row++)
     {
@@ -1647,6 +1689,14 @@ int main (int argc, char *argv[])
     console_printf ("Using interface %s (%s)\n", arg_pcap_interface_name, interface_description);
     console_printf ("Test interval = %" PRIi64 " (secs)\n", arg_test_interval_secs);
     console_printf ("Frame debug enabled = %s\n", arg_frame_debug_enabled ? "Yes" : "No");
+    if (arg_max_frame_rate_hz > 0)
+    {
+        console_printf ("Frame transmit max rate = %" PRIi64 " Hz\n", arg_max_frame_rate_hz);
+    }
+    else
+    {
+        console_printf ("Frame transmit max rate = None\n");
+    }
     
     /* Create the transmit_receive_thread */
     frame_tx_rx_thread_context_t *const tx_rx_thread_context = calloc (1, sizeof (*tx_rx_thread_context));
