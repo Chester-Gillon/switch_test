@@ -61,7 +61,7 @@ typedef struct
 /** Define a locally administated MAC address and VLAN for each possible switch port under test.
     The last octet of the MAC address is the index into the array, which is used an optimisation when looking
     up the port number of a received frame (to avoid having to search the table). */
-#define NUM_DEFINED_PORTS 24
+#define NUM_DEFINED_PORTS 48
 static const port_id_t test_ports[NUM_DEFINED_PORTS] =
 {
     { .switch_port_number =  1, .mac_addr = {2,0,1,0,0, 0}, .vlan = 1001},
@@ -88,6 +88,30 @@ static const port_id_t test_ports[NUM_DEFINED_PORTS] =
     { .switch_port_number = 22, .mac_addr = {2,0,1,0,0,21}, .vlan = 1022},
     { .switch_port_number = 23, .mac_addr = {2,0,1,0,0,22}, .vlan = 1023},
     { .switch_port_number = 24, .mac_addr = {2,0,1,0,0,23}, .vlan = 1024},
+    { .switch_port_number = 25, .mac_addr = {2,0,1,0,0,24}, .vlan = 1025},
+    { .switch_port_number = 26, .mac_addr = {2,0,1,0,0,25}, .vlan = 1026},
+    { .switch_port_number = 27, .mac_addr = {2,0,1,0,0,26}, .vlan = 1027},
+    { .switch_port_number = 28, .mac_addr = {2,0,1,0,0,27}, .vlan = 1028},
+    { .switch_port_number = 29, .mac_addr = {2,0,1,0,0,28}, .vlan = 1029},
+    { .switch_port_number = 30, .mac_addr = {2,0,1,0,0,29}, .vlan = 1030},
+    { .switch_port_number = 31, .mac_addr = {2,0,1,0,0,30}, .vlan = 1031},
+    { .switch_port_number = 32, .mac_addr = {2,0,1,0,0,31}, .vlan = 1032},
+    { .switch_port_number = 33, .mac_addr = {2,0,1,0,0,32}, .vlan = 1033},
+    { .switch_port_number = 34, .mac_addr = {2,0,1,0,0,33}, .vlan = 1034},
+    { .switch_port_number = 35, .mac_addr = {2,0,1,0,0,34}, .vlan = 1035},
+    { .switch_port_number = 36, .mac_addr = {2,0,1,0,0,35}, .vlan = 1036},
+    { .switch_port_number = 37, .mac_addr = {2,0,1,0,0,36}, .vlan = 1037},
+    { .switch_port_number = 38, .mac_addr = {2,0,1,0,0,37}, .vlan = 1038},
+    { .switch_port_number = 39, .mac_addr = {2,0,1,0,0,38}, .vlan = 1039},
+    { .switch_port_number = 40, .mac_addr = {2,0,1,0,0,39}, .vlan = 1040},
+    { .switch_port_number = 41, .mac_addr = {2,0,1,0,0,40}, .vlan = 1041},
+    { .switch_port_number = 42, .mac_addr = {2,0,1,0,0,41}, .vlan = 1042},
+    { .switch_port_number = 43, .mac_addr = {2,0,1,0,0,42}, .vlan = 1043},
+    { .switch_port_number = 44, .mac_addr = {2,0,1,0,0,43}, .vlan = 1044},
+    { .switch_port_number = 45, .mac_addr = {2,0,1,0,0,44}, .vlan = 1045},
+    { .switch_port_number = 46, .mac_addr = {2,0,1,0,0,45}, .vlan = 1046},
+    { .switch_port_number = 47, .mac_addr = {2,0,1,0,0,46}, .vlan = 1047},
+    { .switch_port_number = 48, .mac_addr = {2,0,1,0,0,47}, .vlan = 1048},
 };
 
 
