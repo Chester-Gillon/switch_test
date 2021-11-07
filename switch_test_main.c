@@ -282,14 +282,24 @@ static bool arg_frame_debug_enabled = false;
 /* Used to store pending receive frames for one source / destination port combination.
  * As frames are transmitted they are stored in, and then removed once received.
  *
- * MAX_PENDING_RX_FRAMES is set to a small value as there is one copy of this store for each source / destination port
- * combination and frames are not expected to queue in the network hardware.
+ * Pending receive frames are stored for each source / destination port combination since:
+ * a. Frames for a given source / destination port combination shouldn't get reordered.
+ * b. Upon receipt saves having to search through all pending frames.
+ *
+ * NOMINAL_TOTAL_PENDING_RX_FRAMES defines the total number of pending receive frames which can be stored across all
+ * source / destination port combinations, and allows for both latency in the test frames being circulated around the switches
+ * and any delay in the software polling for frame receipt. It's value is set based upon the initial code which fixed to test
+ * 24 switch ports (23x24 so 552 combinations) and 3 pending rx frames per combination, and doubled to give some leeway.
+ *
+ * The actual number of pending receive frames per combination is set at run time according to the number of ports being tested.
  *
  * Missing frames get detected either:
  * a. If a single frame is missing, the missing frame is detected when the next expected frame has a later sequence number.
  * b. If multiple frames are missing, a missing frame is detected when the next transmit occurs and the 
  *    pending_rx_sequence_numbers[] array is full. */
-#define MAX_PENDING_RX_FRAMES 3
+#define NOMINAL_TOTAL_PENDING_RX_FRAMES 3312
+#define MIN_TESTED_PORTS 2
+#define MIN_PENDING_RX_FRAMES_PER_PORT_COMBO 3
 typedef struct
 {
     /* The number of frames which have been transmitted and are pending for receipt */
@@ -299,12 +309,12 @@ typedef struct
     /* Index in pending_rx_sequence_numbers[] which contains the next expected receive frame */
     uint32_t rx_index;
     /* Circular buffer used to record pending sequence numbers for receive frames */
-    uint32_t pending_rx_sequence_numbers[MAX_PENDING_RX_FRAMES];
+    uint32_t *pending_rx_sequence_numbers;
     /* When frame debug is enabled points at the frame record for the FRAME_RECORD_TX_TEST_FRAME for each pending receive frame,
      * so that if a frame is not received the transmit frame record can be marked as such.
      *
      * Done this way round to avoid marking any transmits frames at the end of a test sequence are not marked as missing. */
-    frame_record_t *tx_frame_records[MAX_PENDING_RX_FRAMES];
+    frame_record_t **tx_frame_records;
 } pending_rx_frames_t;
 
 
@@ -338,6 +348,14 @@ typedef struct
      * They are used to report diagnostic information about if missed frames could be due to dropped packets in the software,
      * rather than the switch under test. */
     struct pcap_stat pcap_statistics;
+    /* The maximum value of num_pending_rx_frames which has been seen for any source / destination port combination during 
+     * the test. Used to collect debug information about how close to the MAX_PENDING_RX_FRAMES a test without any errors is
+     * getting. This value can get to the maximum if missed frames get reported during the test when the transmission detects
+     * all pending rx sequence numbers are in use.
+     *
+     * If Rx Unexpected frames are reported and max_pending_rx_frames is MAX_PENDING_RX_FRAMES this suggests the maximum value
+     * should be increased to allow for the latency in the frames being sent by the switches and getting thtough the software. */
+    uint32_t max_pending_rx_frames;
     /* Set true in the final statistics before the transmit/receive thread exits */
     bool final_statistics;
 } frame_test_statistics_t;
@@ -390,6 +408,8 @@ typedef struct
     int64_t tx_interval;
     /* When tx_rate_limited is true, the monotonic time at which to transmit the next frame */
     int64_t tx_time_of_next_frame;
+    /* The maximum number of pending receive frames for each source / destination port combination during the test */
+    uint32_t pending_rx_sequence_numbers_length;
 } frame_tx_rx_thread_context_t;
 
 
@@ -717,9 +737,9 @@ static void read_command_line_arguments (const int argc, char *argv[])
         display_usage (program_name);
     }
     
-    if (num_tested_port_indices < 2)
+    if (num_tested_port_indices < MIN_TESTED_PORTS)
     {
-        printf ("Error: A minimum of two ports must be tested\n\n");
+        printf ("Error: A minimum of %d ports must be tested\n\n", MIN_TESTED_PORTS);
         display_usage (program_name);
     }
     
@@ -1022,12 +1042,15 @@ static void transmit_receive_initialise (frame_tx_rx_thread_context_t *const con
         {
             pending_rx_frames_t *const pending = &context->pending_rx_frames[source_port_index][destination_port_index];
             
+            pending->pending_rx_sequence_numbers = NULL;
+            pending->tx_frame_records = NULL;
             pending->num_pending_rx_frames = 0;
             pending->tx_index = 0;
             pending->rx_index = 0;
         }
     }
     reset_frame_test_statistics (&context->statistics);
+    context->statistics.max_pending_rx_frames = 0;
     context->statistics.final_statistics = false;
     
     if (arg_frame_debug_enabled)
@@ -1055,6 +1078,43 @@ static void transmit_receive_initialise (frame_tx_rx_thread_context_t *const con
     {
         context->tx_interval = NSECS_PER_SEC / arg_max_frame_rate_hz;
         context->tx_time_of_next_frame = now;
+    }
+
+    /* Calculate the number of pending rx frames which can be stored per tested source / destination port combination.
+     * This aims for a nomimal total number of pending rx frames divided among the the number of combinations tested. */
+    const uint32_t num_tested_port_combinations = num_tested_port_indices * (num_tested_port_indices - 1);
+    context->pending_rx_sequence_numbers_length = NOMINAL_TOTAL_PENDING_RX_FRAMES / num_tested_port_combinations;
+    if (context->pending_rx_sequence_numbers_length < MIN_PENDING_RX_FRAMES_PER_PORT_COMBO)
+    {
+        context->pending_rx_sequence_numbers_length = MIN_PENDING_RX_FRAMES_PER_PORT_COMBO;
+    }
+
+    /* Allocate space for pending rx frames for each tested source / destination port combination tested */
+    const uint32_t pending_rx_sequence_numbers_pool_size =
+            num_tested_port_combinations * context->pending_rx_sequence_numbers_length;
+    uint32_t *const pending_rx_sequence_numbers_pool = calloc (pending_rx_sequence_numbers_pool_size, sizeof (uint32_t));
+    frame_record_t **const tx_frame_records_pool = calloc (pending_rx_sequence_numbers_pool_size, sizeof (frame_record_t *));
+    
+    uint32_t pool_index = 0;
+    for (uint32_t source_tested_port_index = 0; source_tested_port_index < num_tested_port_indices; source_tested_port_index++)
+    {
+        const uint32_t source_port_index = tested_port_indices[source_tested_port_index];
+        
+        for (uint32_t destination_tested_port_index = 0;
+             destination_tested_port_index < num_tested_port_indices;
+             destination_tested_port_index++)
+        {
+            const uint32_t destination_port_index = tested_port_indices[destination_tested_port_index];
+            
+            if (source_port_index != destination_port_index)
+            {
+                pending_rx_frames_t *const pending = &context->pending_rx_frames[source_port_index][destination_port_index];
+                
+                pending->pending_rx_sequence_numbers = &pending_rx_sequence_numbers_pool[pool_index];
+                pending->tx_frame_records = &tx_frame_records_pool[pool_index];
+                pool_index += context->pending_rx_sequence_numbers_length;
+            }
+        }
     }
 }
 
@@ -1218,7 +1278,7 @@ static void handle_pending_rx_frame (frame_tx_rx_thread_context_t *const context
             
             pending->num_pending_rx_frames--;
             pending->tx_frame_records[pending->rx_index] = NULL;
-            pending->rx_index = (pending->rx_index + 1) % MAX_PENDING_RX_FRAMES;
+            pending->rx_index = (pending->rx_index + 1) % context->pending_rx_sequence_numbers_length;
         }
         
         if (!pending_match_found)
@@ -1275,7 +1335,7 @@ static void transmit_next_test_frame (frame_tx_rx_thread_context_t *const contex
     port_stats->num_tx_frames++;
 
     /* If the maximum number of receive frames are pending, then mark the oldest as missing */
-    if (pending->num_pending_rx_frames == MAX_PENDING_RX_FRAMES)
+    if (pending->num_pending_rx_frames == context->pending_rx_sequence_numbers_length)
     {
         port_stats->num_missing_rx_frames++;
         context->statistics.total_missing_frames++;
@@ -1284,14 +1344,18 @@ static void transmit_next_test_frame (frame_tx_rx_thread_context_t *const contex
         {
             pending->tx_frame_records[pending->rx_index]->frame_missed = true;
         }
-        pending->rx_index = (pending->rx_index + 1) % MAX_PENDING_RX_FRAMES;
+        pending->rx_index = (pending->rx_index + 1) % context->pending_rx_sequence_numbers_length;
     }
     
     /* Record the transmitted frame as pending receipt */
     pending->pending_rx_sequence_numbers[pending->tx_index] = context->next_tx_sequence_number;
     pending->tx_frame_records[pending->tx_index] = recorded_frame;
-    pending->tx_index = (pending->tx_index + 1) % MAX_PENDING_RX_FRAMES;
+    pending->tx_index = (pending->tx_index + 1) % context->pending_rx_sequence_numbers_length;
     pending->num_pending_rx_frames++;
+    if (pending->num_pending_rx_frames > context->statistics.max_pending_rx_frames)
+    {
+        context->statistics.max_pending_rx_frames = pending->num_pending_rx_frames;
+    }
 
     /* Advance to the next frame which will be transmitted */
     context->next_tx_sequence_number++;
@@ -1779,6 +1843,9 @@ int main (int argc, char *argv[])
         console_printf ("pthread_join() failed rc=%d\n", rc);
         exit (EXIT_FAILURE);
     }
+    
+    console_printf ("Max pending rx frames = %" PRIu32 " out of %" PRIu32 "\n",
+            tx_rx_thread_context->statistics.max_pending_rx_frames, tx_rx_thread_context->pending_rx_sequence_numbers_length);
 
     /* Write the debug frame recording information if enabled */
     if (arg_frame_debug_enabled)
