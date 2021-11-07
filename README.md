@@ -394,4 +394,53 @@ Total test intervals with failures = 0
 
 Had some more instances on only ports 1 to 4 working, and from the serial console could see that the LevelOne GSW-2472TGX switch
 had been rebooting itself.
- 
+
+
+== Maximum frame length allowing for VLAN tag ==
+
+The orignal code set the size of ethercat_frame_t to 1514, which was the maximum specified in IEEE 802.3 prior to the
+definition of the optional VLAN tag.
+
+https://en.wikipedia.org/wiki/Ethernet_frame notes that the IEEE 802.3ac specification which added the VLAN tag
+increased the maximum frame size by 4 octets to allow for the encapsulated VLAN tag
+
+When the code was re-compiled to increase ethercat_frame_t to 1518 then PC with the Intel(R) 82579V Gigabit Network adapter:
+a. Running Linux (3.10 Kernel) that the code ran successfully, and Wireshark showed the increase in the frame size.
+b. Running under Windows 10 failed with:
+Error sending the packet: send error: PacketSendPacket failed: A device attached to the system is not functioning.  (31)
+
+PacketSendPacket(), the function returning the error, is from the PACKET.DLL packet capture driver
+
+Under Windows 10 the MTU is reported as 1500:
+C:\Users\mr_halfword\switch_test\Release>netsh interface ipv4 show subinterface
+
+   MTU  MediaSenseState   Bytes In  Bytes Out  Interface
+------  ---------------  ---------  ---------  -------------
+4294967295                1          0       8065  Loopback Pseudo-Interface 1
+  1500                1   31410294    4207260  Ethernet 3
+  1500                1          0      42376  vEthernet (Default Switch)
+
+Tried increasing the MTU by 4 bytes (as administrator):
+C:\WINDOWS\system32>netsh interface ipv4 set subinterface "Ethernet 3" mtu=1504 store=persistent
+Ok.
+
+Which reads back as changed:
+C:\Users\mr_halfword\switch_test\Release>netsh interface ipv4 show subinterface
+
+   MTU  MediaSenseState   Bytes In  Bytes Out  Interface
+------  ---------------  ---------  ---------  -------------
+4294967295                1          0       8065  Loopback Pseudo-Interface 1
+  1504                1   31413790    4209263  Ethernet 3
+  1500                1          0      43184  vEthernet (Default Switch)
+
+But still fails, and a re-boot didn't help.
+
+The same issue occurred on the Windows 10 laptop with a "Realtek PCIe GBE Family Controller"
+
+Due to the above reverted the MTU to the original value of 1500.
+
+What did work is enabling Jumbo Frames:
+a. For the "Realtek PCIe GBE Family Controller" in the Device Manager in Advanced changed the "Jumbo Frame"
+   from "Disabled" to "2KB MTU".
+b. For the "Intel(R) 82579V Gigabit Network" in the Device Manager in Advanced changed the "Jumbo Packet"
+   from "Disabled" to "4088 Bytes".

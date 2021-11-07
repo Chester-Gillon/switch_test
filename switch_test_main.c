@@ -130,8 +130,21 @@ static uint32_t num_tested_port_indices;
  *   https://infosys.beckhoff.com/english.php?content=../content/1033/tc3_io_intro/1257993099.html
  *
  * The Address is used a sequence number incremented for each test frame transmitted.
+ *
+ * The value of ETHERCAT_DATAGRAM_LEN results in the maximum MTU of 1500, which is formed from the EtherCAT Datagram header
+ * through Working Counter inclusive.
+ *
+ * https://en.wikipedia.org/wiki/Ethernet_frame notes that the IEEE 802.3ac specification which added the
+ * VLAN tag increased the maximum frame size by 4 octets to allow for the encapsulated VLAN tag.
+ *
+ * One difference between Linux and Windows found that with the MTU set to 1500:
+ * a. Linux could send this frame without any configuration changes.
+ * b. Under Windows attempting to send this frame resulted in an error from the PacketSendPacket() function in the 
+ *    PACKET.DLL packet capture driver which the pcap_sendpacket() PCAP function calls.
+ *    To allow this frame to be sent under Windows had use the Windows device manager for the network adapter to
+ *    enable the "Jumbo Frame" or "Jumbo Packet" option, selecting the smallest jumbo frame size.
  */
-#define ETHERCAT_DATAGRAM_LEN 1482 /* Results in maximum length Ethernet frame when VLAN tag present */
+#define ETHERCAT_DATAGRAM_LEN 1486
 typedef struct __attribute__((packed)) 
 {
     /* Ethernet Header */
@@ -1632,7 +1645,7 @@ int main (int argc, char *argv[])
     int rc;
     
     /* Check that ethercat_frame_t has the expected size */
-    if (sizeof (ethercat_frame_t) != 1514)
+    if (sizeof (ethercat_frame_t) != 1518)
     {
         fprintf (stderr, "sizeof (ethercat_frame_t) unexpected value of %" PRIuPTR "\n", sizeof (ethercat_frame_t));
         exit (EXIT_FAILURE);
