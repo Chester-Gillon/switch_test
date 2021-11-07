@@ -270,6 +270,7 @@ static int64_t arg_test_interval_secs = 10;
 /* Command line argument which specifies the maximum rate at which transmit frames can be sent.
  * If <= 0 then no maximum rate is applied, i.e. transmits as quickly as possible. */
 static int64_t arg_max_frame_rate_hz = -1;
+static bool arg_max_frame_rate_hz_set = false;
 
 
 /* Command line argument which controls how the test runs:
@@ -539,7 +540,9 @@ static void display_usage (const char *const program_name)
     printf ("     string, with each item either a single port number or a start and end port\n");
     printf ("     range delimited by a dash. E.g. 1,4-6 specifies ports 1,4,5,6.\n");
     printf ("     If not specified defaults to all %u defined ports\n", NUM_DEFINED_PORTS);
-    printf ("  -r specifies the maximum rate at which frames are transmitted\n");
+    printf ("  -r Specifies the maximum rate at which frames are transmitted.\n");
+    printf ("     Using a value <= 0 means the frame transmission rate is not limited,\n");
+    printf ("     even when testing a small number of ports.\n");
     
     exit (EXIT_FAILURE);
 }
@@ -719,6 +722,7 @@ static void read_command_line_arguments (const int argc, char *argv[])
                 printf ("Error: Invalid <rate_hz> %s\n", optarg);
                 exit (EXIT_FAILURE);
             }
+            arg_max_frame_rate_hz_set = true;
             break;
             
         case '?':
@@ -1759,6 +1763,31 @@ int main (int argc, char *argv[])
     {
         fprintf (stderr, "Failed to create %s\n", console_filename);
         exit (EXIT_FAILURE);
+    }
+
+    /* The test setup is assumed for the PC running this program having a 1G Ethernet interface sending frames to the
+     * injection switch, and 100M ports between the injection switch and the switch under test.
+     *
+     * If the number of 100M ports being tested is less than the (assumed) ratio between the Ethernet interface on this PC
+     * and the speed of the ports under test then frames can be lost.
+     *
+     * Therefore, unless the user has specifically set a maximum frame rate then automatically set a frame rate to protect
+     * against frame loss according to the number of ports under test. */
+    const int64_t injection_port_to_switch_port_under_test_speed_ratio = 10;
+    const int64_t injection_port_bit_rate = 1000000000;
+    const int64_t test_packet_total_octets = 7 + /* Preamble */
+                                             1 + /* Start frame delimiter */
+                                             sizeof (ethercat_frame_t) +
+                                             4 + /* Frame check sequence */
+                                             12; /* Interpacket gap */
+    const int64_t bits_per_octet = 8;
+    const int64_t max_frame_rate_on_injection_port = injection_port_bit_rate / (test_packet_total_octets * bits_per_octet);
+    if ((num_tested_port_indices < injection_port_to_switch_port_under_test_speed_ratio) && (!arg_max_frame_rate_hz_set))
+    {
+        arg_max_frame_rate_hz = (max_frame_rate_on_injection_port * num_tested_port_indices) /
+                injection_port_to_switch_port_under_test_speed_ratio;
+        console_printf ("Automatically limiting maximum frame rate due to testing less than %" PRIi64 " ports\n",
+                injection_port_to_switch_port_under_test_speed_ratio);
     }
     
     /* Report the command line arguments used */
