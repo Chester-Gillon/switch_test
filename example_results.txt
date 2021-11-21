@@ -10301,3 +10301,185 @@ the values were before started the test.
 
 From the information collected not sure where the frames got dropped, i.e. the test codes doesn't currently
 capture any port statistics, on either the PC running the test nor the injection switch.
+
+
+== Soak test on desktop running Linux ==
+
+A soak test was run on the Linex destop for 9 hours 21 minutes.
+
+The output from the first and last test iteration:
+Writing per-port counts to 20211120T120638_per_port_counts_linux.csv
+Using interface eth0 (No description available)
+Test interval = 10 (secs)
+Frame debug enabled = No
+Frame transmit max rate = None
+Press Ctrl-C to stop test at end of next test interval
+
+12:06:48.634
+      Tx Test        Tx Copy        Rx Test  Rx Unexpected     Rx Flooded       Rx Other  missed frames   tx rate (Hz)
+       806795              0         806677              0              0              0              0        80679.2
+
+Summary of missed frames : '.' none missed 'S' some missed 'A' all missed
+Source  Destination ports --->
+  port           111111111122222
+        123456789012345678901234
+     1   .......................
+     2  . ......................
+     3  .. .....................
+     4  ... ....................
+     5  .... ...................
+     6  ..... ..................
+     7  ...... .................
+     8  ....... ................
+     9  ........ ...............
+    10  ......... ..............
+    11  .......... .............
+    12  ........... ............
+    13  ............ ...........
+    14  ............. ..........
+    15  .............. .........
+    16  ............... ........
+    17  ................ .......
+    18  ................. ......
+    19  .................. .....
+    20  ................... ....
+    21  .................... ...
+    22  ..................... ..
+    23  ...................... .
+    24  ....................... 
+Total test intervals with failures = 0
+<snip>
+21:27:58.634
+      Tx Test        Tx Copy        Rx Test  Rx Unexpected     Rx Flooded       Rx Other  missed frames   tx rate (Hz)
+       806422              0         806422              0              0              0              0        80642.1
+
+Summary of missed frames : '.' none missed 'S' some missed 'A' all missed
+Source  Destination ports --->
+  port           111111111122222
+        123456789012345678901234
+     1   .......................
+     2  . ......................
+     3  .. .....................
+     4  ... ....................
+     5  .... ...................
+     6  ..... ..................
+     7  ...... .................
+     8  ....... ................
+     9  ........ ...............
+    10  ......... ..............
+    11  .......... .............
+    12  ........... ............
+    13  ............ ...........
+    14  ............. ..........
+    15  .............. .........
+    16  ............... ........
+    17  ................ .......
+    18  ................. ......
+    19  .................. .....
+    20  ................... ....
+    21  .................... ...
+    22  ..................... ..
+    23  ...................... .
+    24  ....................... 
+Total test intervals with failures = 0
+Max pending rx frames = 1 out of 6
+
+
+== Sartup behaviour ==
+
+Following from the 1st soak test on 20211113T185220_per_port_counts_linux.csv where the 1st test
+interation had severval hundred missed frames performed the following sequence:
+1. Desktop Linux PC booted.
+2. The injection switch and switch under test powered off.
+3. Switch on the injection switch and switch under test and wait for the switches to appear to
+   be ready for the test based the following LED sequence completing:
+   a. Initially:
+      - All 24 port LEDs on the switch under test are ON
+      - LEDs for ports 1-24 on the injection switch are amber - meaning 10M
+      - LED for port 25 on the injection switch (connected to the PC) is off
+   b. Console LED on the injection switch is flashing meaning the self test is running.
+   c. Console LED on the injecton switch goes out.
+   d. LEDs for all ports 1-24 on the injection switch and switch under test go out.
+   e. One a time LEDs for ports 1 to 24 on the injection switch and switch under test come on;
+      this time the injection switch ports LEDs are green meaning operating at 100M.
+   f. Injection switch port 25 LED turns green.
+   g. Start running the switch_test
+
+The following was observed multiple times:
+a. The first test interval had a high number of missed frames and also "Rx Flooded" frames:
+21:33:57.193
+      Tx Test        Tx Copy        Rx Test  Rx Unexpected     Rx Flooded       Rx Other  missed frames   tx rate (Hz)
+       806787              0         136671              0         309203              0         669998        80677.7
+
+Summary of missed frames : '.' none missed 'S' some missed 'A' all missed
+Source  Destination ports --->
+  port           111111111122222
+        123456789012345678901234
+     1   SSSSSSSSSSSSSSSSSSSSSSS
+     2  S SSSSSSSSSSSSSSSSSSSSSS
+     3  SS SSSSSSSSSSSSSSSSSSSSS
+     4  SSS SSSSSSSSSSSSSSSSSSSS
+     5  SSSS SSSSSSSSSSSSSSSSSSS
+     6  SSSSS SSSSSSSSSSSSSSSSSS
+     7  SSSSSS SSSSSSSSSSSSSSSSS
+     8  SSSSSSS SSSSSSSSSSSSSSSS
+     9  SSSSSSSS SSSSSSSSSSSSSSS
+    10  SSSSSSSSS SSSSSSSSSSSSSS
+    11  SSSSSSSSSS SSSSSSSSSSSSS
+    12  SSSSSSSSSSS SSSSSSSSSSSS
+    13  SSSSSSSSSSSS SSSSSSSSSSS
+    14  SSSSSSSSSSSSS SSSSSSSSSS
+    15  SSSSSSSSSSSSSS SSSSSSSSS
+    16  SSSSSSSSSSSSSSS SSSSSSSS
+    17  SSSSSSSSSSSSSSSS SSSSSSS
+    18  SSSSSSSSSSSSSSSSS SSSSSS
+    19  SSSSSSSSSSSSSSSSSS SSSSS
+    20  SSSSSSSSSSSSSSSSSSS SSSS
+    21  SSSSSSSSSSSSSSSSSSSS SSS
+    22  SSSSSSSSSSSSSSSSSSSSS SS
+    23  SSSSSSSSSSSSSSSSSSSSSS S
+    24  SSSSSSSSSSSSSSSSSSSSSSS 
+PCAP statistics : ps_recv=445894 ps_drop=0 ps_ifdrop=445894
+Total test intervals with failures = 1 : last failure NOW
+
+b. The 2nd test iteration was error free.
+
+c. The 3rd test iteration had several hundred missed frames, but no Rx Flooded frames:
+21:34:17.193
+      Tx Test        Tx Copy        Rx Test  Rx Unexpected     Rx Flooded       Rx Other  missed frames   tx rate (Hz)
+       806706              0         806067              0              0              0            651        80671.0
+
+Summary of missed frames : '.' none missed 'S' some missed 'A' all missed
+Source  Destination ports --->
+  port           111111111122222
+        123456789012345678901234
+     1   SSSSSSSSSSSSSSSSSSSSSSS
+     2  S SSSSSSSSSSSSSSSSSSSSSS
+     3  SS SSSSSSSSSSSSSSSSSSSSS
+     4  SSS SSSSSSSSSSSSSSSS.SSS
+     5  SSSS SSSSSSSSSSSSSSSS.SS
+     6  SSSSS SSSSSSSSSSSSSSSS.S
+     7  SSSSSS SSSSSSSSSSSSSSS..
+     8  SSSSSSS SSSSSSSSSSSSSSS.
+     9  SSSSSSSS SSSSSSSSSSSSSSS
+    10  SSSSSSSSS SSSSSSSSSSSSSS
+    11  SSSSSSSSSS SSSSSSSSSSSSS
+    12  SSSSSSSSSSS SSSSSSSSSSSS
+    13  SSSSSSSSSSSS SSSSSSSSSSS
+    14  SSSSSSSSSSSSS SSSSSSSSSS
+    15  SSSSSSSSSSSSSS SSSSSSSSS
+    16  SSSSSSSSSSSSSSS SSSSSSSS
+    17  SSSSSSSSSSSSSSSS SSSSSSS
+    18  SSSSSSSSSSSSSSSSS SSSSSS
+    19  SSSSSSSSSSSSSSSSSS SSSSS
+    20  SSSSSSSSSSSSSSSSSSS SSSS
+    21  SSSSSSSSSSSSSSSSSSSS SSS
+    22  SSSSSSSSSSSSSSSSSSSSS SS
+    23  SSSSSSSSSSSSSSSSSSSSSS S
+    24  SSSSSSSSSSSSSSSSSSSSSSS 
+PCAP statistics : ps_recv=2058640 ps_drop=0 ps_ifdrop=2058640
+
+This points at the switch not being quite ready when the port LEDs are first all up.
+Not sure at what point the managed switch cofiguration is complete w.r.t. the port LEDs all turning on.
+E.g. when is the VLAN configuration complete?
+
