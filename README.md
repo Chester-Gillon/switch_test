@@ -444,3 +444,18 @@ a. For the "Realtek PCIe GBE Family Controller" in the Device Manager in Advance
    from "Disabled" to "2KB MTU".
 b. For the "Intel(R) 82579V Gigabit Network" in the Device Manager in Advanced changed the "Jumbo Packet"
    from "Disabled" to "4088 Bytes".
+c. For the "Mellanox ConnectX-2 Ethernet Adapter" in the Device Manager in Advanced changed the "Jumbo Packet"
+   from "1514" to "9600".
+
+
+== Mellanox ConnectX-2 not capturing VLAN tags under Windows 10 21H1 ==
+
+Running the switch_test under Windows 10 pro 21H1 with a "Mellanox ConnectX-2" reports all frames missed.
+
+The debug capture shows the test frames reported as "Rx Other" due to their being no VLAN tag.
+
+Can't find any documented way to stop the VLAN tags from being stripped on receipt when using the
+regular network stack.
+
+With the same computer booted into Ubuntu 18.04 the frames received from the Mellanox ConnectX-2
+had the VLAN tag. I.e. appears to be a Windows driver limitation.
