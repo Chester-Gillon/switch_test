@@ -1,0 +1,276 @@
+The following shows the config which was used for the TP-Link T1700G-28TQ as an injection switch to test
+24 100M ports on a switch under test.
+
+On the injection switch:
+- 1G Ports 1 to 24 connected to the switch under test, where these ports auto-negotiate to 100M to match
+  the maximum supported speed on the switch under test.
+- 10G port 26 connected to the PC running the switch_test program.
+  Uses a SFP+ DAC cable and a QSFP to SFP+ adapter to connect to one QSFP port on a dual-port Mellanox
+  ConnectX-2 VPI card in the PC.
+
+The important settings compared to the defaults are:
+a. Under L2 Features -> 802.1Q VLAN -> VLAN config add VLANs 1001 .. 1024 in which:
+   - A tagged member of port 26.
+   - A untagged member of one port 1 .. 24 (corresponding to VLANs 1001 .. 1024)
+b. Under L2 Features -> 802.1Q VLAN -> Port config for each port 1 .. 24 set it's PVID to 1001 .. 1024
+   corresponding to the VLAN for the port. This is so that frames received from the switch under test get
+   tagged with a VLAN to indicate which port they were received on.
+
+Also changed the System-VLAN ID 1 to remove untagged member ports 1 to 24. After doing just a) above got a
+broadcast storm and initially changed the System-VLAN ID as initially thought that would avoid the broadcast
+storm. However, without b) any frames received from the switch under test weren't tagged which could have lead
+to the broadcast storm allowing frames to circulate.
+
+In the factory defaults of the T1700G-28TQ Spanning Tree was already globablly disabled.
+
+
+T1700G-28TQ#show running-config 
+!T1700G-28TQRev3
+
+
+#
+ vlan 1001
+ name "port 1"
+ #
+ vlan 1002
+ name "port 2"
+ #
+ vlan 1003
+ name "port 3"
+ #
+ vlan 1004
+ name "port 4"
+ #
+ vlan 1005
+ name "port 5"
+ #
+ vlan 1006
+ name "port 6"
+ #
+ vlan 1007
+ name "port 7"
+ #                                    
+ vlan 1008
+ name "port 8"
+ #
+ vlan 1009
+ name "port 9"
+ #
+ vlan 1010
+ name "port 10"
+ #
+ vlan 1011
+ name "port 11"
+ #
+ vlan 1012
+ name "port 12"
+ #
+ vlan 1013
+ name "port 13"
+ #
+ vlan 1014
+ name "port 14"
+ #
+ vlan 1015
+ name "port 15"
+ #                                    
+ vlan 1016
+ name "port 16"
+ #
+ vlan 1017
+ name "port 17"
+ #
+ vlan 1018
+ name "port 18"
+ #
+ vlan 1019
+ name "port 19"
+ #
+ vlan 1020
+ name "port 20"
+ #
+ vlan 1021
+ name "port 21"
+ #
+ vlan 1022
+ name "port 22"
+ #
+ vlan 1023
+ name "port 23"
+ #                                    
+ vlan 1024
+ name "port 24"
+ #
+#
+ switch 1 provision T1700G-28TQRev3
+ jumbo-size 9216
+ user name admin privilege admin secret 5 $1$B0B2B>B8G9E6J4J6D2H8D9@=D9H/A>L2$'}./
+ telnet disable
+ ip ssh server
+ system-time ntp UTC+08:00 133.100.9.2 139.78.100.163 12
+ #
+ #
+#
+interface vlan 1
+ ip address 192.168.0.91 255.255.255.0
+ ipv6 enable
+#
+interface gigabitEthernet 1/0/1
+ switchport general allowed vlan 1001 untagged
+ no switchport general allowed vlan 1
+ switchport pvid 1001
+ 
+#
+interface gigabitEthernet 1/0/2       
+ switchport general allowed vlan 1002 untagged
+ no switchport general allowed vlan 1
+ switchport pvid 1002
+ 
+#
+interface gigabitEthernet 1/0/3
+ switchport general allowed vlan 1003 untagged
+ no switchport general allowed vlan 1
+ switchport pvid 1003
+ 
+#
+interface gigabitEthernet 1/0/4
+ switchport general allowed vlan 1004 untagged
+ no switchport general allowed vlan 1
+ switchport pvid 1004
+ 
+#
+interface gigabitEthernet 1/0/5
+ switchport general allowed vlan 1005 untagged
+ no switchport general allowed vlan 1
+ switchport pvid 1005
+ 
+#
+interface gigabitEthernet 1/0/6       
+ switchport general allowed vlan 1006 untagged
+ no switchport general allowed vlan 1
+ switchport pvid 1006
+ 
+#
+interface gigabitEthernet 1/0/7
+ switchport general allowed vlan 1007 untagged
+ no switchport general allowed vlan 1
+ switchport pvid 1007
+ 
+#
+interface gigabitEthernet 1/0/8
+ switchport general allowed vlan 1008 untagged
+ no switchport general allowed vlan 1
+ switchport pvid 1008
+ 
+#
+interface gigabitEthernet 1/0/9
+ switchport general allowed vlan 1009 untagged
+ no switchport general allowed vlan 1
+ switchport pvid 1009
+ 
+#
+interface gigabitEthernet 1/0/10      
+ switchport general allowed vlan 1010 untagged
+ no switchport general allowed vlan 1
+ switchport pvid 1010
+ 
+#
+interface gigabitEthernet 1/0/11
+ switchport general allowed vlan 1011 untagged
+ no switchport general allowed vlan 1
+ switchport pvid 1011
+ 
+#
+interface gigabitEthernet 1/0/12
+ switchport general allowed vlan 1012 untagged
+ no switchport general allowed vlan 1
+ switchport pvid 1012
+ 
+#
+interface gigabitEthernet 1/0/13
+ switchport general allowed vlan 1013 untagged
+ no switchport general allowed vlan 1
+ switchport pvid 1013
+ 
+#
+interface gigabitEthernet 1/0/14      
+ switchport general allowed vlan 1014 untagged
+ no switchport general allowed vlan 1
+ switchport pvid 1014
+ 
+#
+interface gigabitEthernet 1/0/15
+ switchport general allowed vlan 1015 untagged
+ no switchport general allowed vlan 1
+ switchport pvid 1015
+ 
+#
+interface gigabitEthernet 1/0/16
+ switchport general allowed vlan 1016 untagged
+ no switchport general allowed vlan 1
+ switchport pvid 1016
+ 
+#
+interface gigabitEthernet 1/0/17
+ switchport general allowed vlan 1017 untagged
+ no switchport general allowed vlan 1
+ switchport pvid 1017
+ 
+#
+interface gigabitEthernet 1/0/18      
+ switchport general allowed vlan 1018 untagged
+ no switchport general allowed vlan 1
+ switchport pvid 1018
+ 
+#
+interface gigabitEthernet 1/0/19
+ switchport general allowed vlan 1019 untagged
+ no switchport general allowed vlan 1
+ switchport pvid 1019
+ 
+#
+interface gigabitEthernet 1/0/20
+ switchport general allowed vlan 1020 untagged
+ no switchport general allowed vlan 1
+ switchport pvid 1020
+ 
+#
+interface gigabitEthernet 1/0/21
+ switchport general allowed vlan 1021 untagged
+ no switchport general allowed vlan 1
+ switchport pvid 1021
+ 
+#
+interface gigabitEthernet 1/0/22      
+ switchport general allowed vlan 1022 untagged
+ no switchport general allowed vlan 1
+ switchport pvid 1022
+ 
+#
+interface gigabitEthernet 1/0/23
+ switchport general allowed vlan 1023 untagged
+ no switchport general allowed vlan 1
+ switchport pvid 1023
+ 
+#
+interface gigabitEthernet 1/0/24
+ switchport general allowed vlan 1024 untagged
+ no switchport general allowed vlan 1
+ switchport pvid 1024
+ 
+#
+interface ten-gigabitEthernet 1/0/25
+ 
+#
+interface ten-gigabitEthernet 1/0/26
+ switchport general allowed vlan 1001-1024 tagged
+ 
+#                                     
+interface ten-gigabitEthernet 1/0/27
+ 
+#
+interface ten-gigabitEthernet 1/0/28
+ 
+#
+#
+
