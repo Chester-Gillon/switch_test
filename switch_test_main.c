@@ -1748,8 +1748,8 @@ int main (int argc, char *argv[])
     const time_t tod_now = time (NULL);
     struct tm broken_down_time;
     char date_time_str[80];
-    char frame_debug_csv_filename[80];
-    char console_filename[80];
+    char frame_debug_csv_filename[160];
+    char console_filename[160];
     
     localtime_r (&tod_now, &broken_down_time);
     strftime (date_time_str, sizeof (date_time_str), "%Y%m%dT%H%M%S", &broken_down_time);
