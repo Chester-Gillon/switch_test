@@ -446,6 +446,8 @@ b. For the "Intel(R) 82579V Gigabit Network" in the Device Manager in Advanced c
    from "Disabled" to "4088 Bytes".
 c. For the "Mellanox ConnectX-2 Ethernet Adapter" in the Device Manager in Advanced changed the "Jumbo Packet"
    from "1514" to "9600".
+d. For the "Mellanox ConnectX-4 Lx Ethernet Adapter" in the Device Manager in Advanced changed the "Jumbo Packet"
+   from "1514" to "9600".
 
 
 == Mellanox ConnectX-2 not capturing VLAN tags under Windows 10 21H1 ==
@@ -458,4 +460,12 @@ Can't find any documented way to stop the VLAN tags from being stripped on recei
 regular network stack.
 
 With the same computer booted into Ubuntu 18.04 the frames received from the Mellanox ConnectX-2
+had the VLAN tag. I.e. appears to be a Windows driver limitation.
+
+
+== Mellanox ConnectX-4 Lx not capturing VLAN tags under Windows 10 21H1 ==
+
+Same issue as with the Mellanox ConnectX-2 above.
+
+With the same computer booted into AlmaLinux 8.5 the frames received from the Mellanox ConnectX-4 Lx
 had the VLAN tag. I.e. appears to be a Windows driver limitation.
