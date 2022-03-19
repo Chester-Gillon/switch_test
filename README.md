@@ -463,9 +463,18 @@ With the same computer booted into Ubuntu 18.04 the frames received from the Mel
 had the VLAN tag. I.e. appears to be a Windows driver limitation.
 
 
-== Mellanox ConnectX-4 Lx not capturing VLAN tags under Windows 10 21H1 ==
+== Mellanox ConnectX-4 Lx (MCX4121A-XCAT) not capturing VLAN tags under Windows 10 21H1 ==
 
 Same issue as with the Mellanox ConnectX-2 above.
 
 With the same computer booted into AlmaLinux 8.5 the frames received from the Mellanox ConnectX-4 Lx
 had the VLAN tag. I.e. appears to be a Windows driver limitation.
+
+The same issue occured with with both:
+a. The as-delivered firmware version 14.25.1020.
+b. After updating to the latest firmware version 14.32.1010.
+
+https://docs.nvidia.com/networking/display/winof2v280/Configuring+the+Driver+Registry+Keys
+documents the registry keys available in WinOF-2 v2.80 which supports the ConnectX-4 Lx
+which was used to install the Windows drivers.
+
