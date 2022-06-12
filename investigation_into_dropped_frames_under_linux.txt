@@ -87,3 +87,154 @@ b. Depending upon the capture mechanism supported by the Kernel, for a given rin
 
    The actual capture mechanism used hasn't been checked.
 
+
+== Large number of missed frames on initial iteration with a ConnectX-4 Lx at 10G ==
+
+When testing with a ConnectX-4 Lx with a 10G link was checking the maximum achieved frame rate under
+AlmaLinux 8.6 with just two 10G switch ports linked with a SFP cable.
+
+When compiled for release, on the first iteration there are ~3000 to ~4000 missed frames. E.g.:
+$ ./switch_test -i enp1s0f0 -p 25,26 -r -1
+Writing per-port counts to 20220612T110559_per_port_counts_linux.csv
+Using interface enp1s0f0 (No description available)
+Test interval = 10 (secs)
+Frame debug enabled = No
+Frame transmit max rate = None
+Press Ctrl-C to stop test at end of next test interval
+
+11:06:09.860
+      Tx Test        Tx Copy        Rx Test  Rx Unexpected     Rx Flooded       Rx Other  missed frames   tx rate (Hz)
+      3287085              0        3283246              0              0              7           3708       328708.5
+
+Summary of missed frames : '.' none missed 'S' some missed 'A' all missed
+Source  Destination ports --->
+  port  22
+        56
+    25   S
+    26  S 
+PCAP statistics : ps_recv=3283384 ps_drop=0 ps_ifdrop=3283622
+otal test intervals with failures = 1 : last failure NOW
+
+11:06:19.860
+      Tx Test        Tx Copy        Rx Test  Rx Unexpected     Rx Flooded       Rx Other  missed frames   tx rate (Hz)
+      3265402              0        3265525              0              0              5              0       326540.2
+
+Summary of missed frames : '.' none missed 'S' some missed 'A' all missed
+Source  Destination ports --->
+  port  22
+        56
+    25   .
+    26  . 
+Total test intervals with failures = 1 : last failure 11:06:09.860
+^C
+11:06:29.860
+      Tx Test        Tx Copy        Rx Test  Rx Unexpected     Rx Flooded       Rx Other  missed frames   tx rate (Hz)
+      3290675              0        3290667              0              0              7              0       329067.5
+
+Summary of missed frames : '.' none missed 'S' some missed 'A' all missed
+Source  Destination ports --->
+  port  22
+        56
+    25   .
+    26  . 
+Total test intervals with failures = 1 : last failure 11:06:09.860
+Max pending rx frames = 1656 out of 1656
+
+
+Attempted the following change t move the start time until after memory allocation and use mlockall.
+However, this didn't resolve the issue with missing frames on the first test iteration when *not*
+saving debug information. When save debug information, and therefore only a single iteration,
+then with a small number of tests the change did seem to allow the single iteration to not have missed
+frames, but might only be due to the achieved frame rate beeing lower when saving the frame content
+for the debug information.
+
+$ git diff switch_test_main.c
+diff --git a/switch_test_main.c b/switch_test_main.c
+index e724fdc..c412fb5 100644
+--- a/switch_test_main.c
++++ b/switch_test_main.c
+@@ -15,6 +15,7 @@
+ 
+ #ifndef _WIN32
+ #include <arpa/inet.h>
++#include <sys/mman.h>
+ #endif
+ 
+ #include <sys/time.h>
+@@ -1072,17 +1073,6 @@ static void transmit_receive_initialise (frame_tx_rx_thread_context_t *const con
+         context->frame_recording.frame_records = NULL;
+     }
+     context->frame_recording.num_frame_records = 0;
+-    
+-    const int64_t now = get_monotonic_time ();
+-    context->statistics.interval_start_time = now;
+-    context->test_interval_end_time = now + (arg_test_interval_secs * NSECS_PER_SEC);
+-    
+-    context->tx_rate_limited = arg_max_frame_rate_hz > 0;
+-    if (context->tx_rate_limited)
+-    {
+-        context->tx_interval = NSECS_PER_SEC / arg_max_frame_rate_hz;
+-        context->tx_time_of_next_frame = now;
+-    }
+ 
+     /* Calculate the number of pending rx frames which can be stored per tested source / destination port combination.
+      * This aims for a nomimal total number of pending rx frames divided among the the number of combinations tested. */
+@@ -1120,6 +1110,18 @@ static void transmit_receive_initialise (frame_tx_rx_thread_context_t *const con
+             }
+         }
+     }
++
++    /* Start the timers for statistics collection and frame transmission */
++    const int64_t now = get_monotonic_time ();
++    context->statistics.interval_start_time = now;
++    context->test_interval_end_time = now + (arg_test_interval_secs * NSECS_PER_SEC);
++
++    context->tx_rate_limited = arg_max_frame_rate_hz > 0;
++    if (context->tx_rate_limited)
++    {
++        context->tx_interval = NSECS_PER_SEC / arg_max_frame_rate_hz;
++        context->tx_time_of_next_frame = now;
++    }
+ }
+ 
+ 
+@@ -1789,6 +1791,12 @@ int main (int argc, char *argv[])
+         console_printf ("Automatically limiting maximum frame rate due to testing less than %" PRIi64 " ports\n",
+                 injection_port_to_switch_port_under_test_speed_ratio);
+     }
++
++#ifndef _WIN32
++    /* Try and avoid page faults while running */
++    rc = mlockall (MCL_CURRENT | MCL_FUTURE);
++    console_printf ("mlockall = %s\n", (rc == 0) ? "Success" : "Failed");
++#endif
+     
+     /* Report the command line arguments used */
+     console_printf ("Writing per-port counts to %s\n", results_summary.per_port_counts_csv_filename);
+
+Total test intervals with failures = 1 : last failure NOW
+
+11:06:19.860
+      Tx Test        Tx Copy        Rx Test  Rx Unexpected     Rx Flooded       Rx Other  missed frames   tx rate (Hz)
+      3265402              0        3265525              0              0              5              0       326540.2
+
+Summary of missed frames : '.' none missed 'S' some missed 'A' all missed
+Source  Destination ports --->
+  port  22
+        56
+    25   .
+    26  . 
+Total test intervals with failures = 1 : last failure 11:06:09.860
+^C
+11:06:29.860
+      Tx Test        Tx Copy        Rx Test  Rx Unexpected     Rx Flooded       Rx Other  missed frames   tx rate (Hz)
+      3290675              0        3290667              0              0              7              0       329067.5
+
+Summary of missed frames : '.' none missed 'S' some missed 'A' all missed
+Source  Destination ports --->
+  port  22
+        56
+    25   .
+    26  . 
+Total test intervals with failures = 1 : last failure 11:06:09.860
+Max pending rx frames = 1656 out of 1656
