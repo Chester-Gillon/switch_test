@@ -1,12 +1,14 @@
 # switch_test
 Experiment for testing an Ethernet switch by using per-port VLANs to direct traffic
 
-================================
+-----------------------------
 
 Under Windows 10 with the netgear DG834G connected as 4 port test switch ran:
+```
 sendpack.exe \Device\NPF_{478AF94A-7EC1-4E69-A500-E966D8ECCBDF}
-
+```
 Which resulted in the packets as shown with a Wireshark filter of eth.addr==01:01:01:01:01:01 :
+```
 No.     Time           Source                Destination           Protocol Length Info
       2 1.717016       MS-NLB-PhysServer-02_02:02:02:02 Private_01:01:01      IPv4     100    Bogus IPv4 version (1, must be 4)
 
@@ -43,28 +45,28 @@ Frame 5: 96 bytes on wire (768 bits), 96 bytes captured (768 bits) on interface 
 Ethernet II, Src: MS-NLB-PhysServer-02_02:02:02:02 (02:02:02:02:02:02), Dst: Private_01:01:01 (01:01:01:01:01:01)
 Internet Protocol Version 4
     0001 .... = Version: 1
-
+```
 This shows the VLAN headers have been stripped from the received packets.
 
 The Ethernet device is Intel(R) 82579V Gigabit Network Connection
 
 
-===============================================
+-----------------------------
 
 https://wiki.wireshark.org/CaptureSetup/VLAN has information that Intel device can strip VLAN tags.
 
-Using Microsoft driver v12.17.10.8 c:\Windows\system32\DRIVERS\e1i65x64.sys
+Using Microsoft driver v12.17.10.8 `c:\Windows\system32\DRIVERS\e1i65x64.sys`
 
 https://www.intel.com/content/www/us/en/support/articles/000005498/network-and-i-o/ethernet-products.html has information
 on registry settings to stop the Windows driver stripping the VLAN tags.
 
-Computer\HKEY_LOCAL_MACHINE\SYSTEM\ControlSet001\Control\Class\{4d36e972-e325-11ce-bfc1-08002be10318}\0003 is the registry
+`Computer\HKEY_LOCAL_MACHINE\SYSTEM\ControlSet001\Control\Class\{4d36e972-e325-11ce-bfc1-08002be10318}\0003` is the registry
 path for the installed "Intel(R) 82579V Gigabit Network Connection"
 
-Tried setting MonitorModeEnabled = 1 but didn't stop VLAN tags being stripped
+`Tried setting MonitorModeEnabled = 1` but didn't stop VLAN tags being stripped
 
-Setting MonitorMode = 1 did allow VLAN tags to be received:
-
+`Setting MonitorMode = 1` did allow VLAN tags to be received:
+```
 No.     Time           Source                Destination           Protocol Length Info
     270 6.970821       MS-NLB-PhysServer-02_02:02:02:02 Private_01:01:01      IPv4     100    Bogus IPv4 version (1, must be 4)
 
@@ -96,11 +98,12 @@ Frame 273: 100 bytes on wire (800 bits), 100 bytes captured (800 bits) on interf
 Ethernet II, Src: MS-NLB-PhysServer-02_02:02:02:02 (02:02:02:02:02:02), Dst: Private_01:01:01 (01:01:01:01:01:01)
 802.1Q Virtual LAN, PRI: 0, DEI: 0, ID: 1009
 Internet Protocol Version 4
+```
 
-
-==========================================
+-----------------------------
 
 Test with all ports connected to a Netgear DG834G under test which shows a pass:
+```
 C:\Users\mr_halfword\switch_test\Debug>switch_test \Device\NPF_{478AF94A-7EC1-4E69-A500-E966D8ECCBDF}
 Saving frame results to frames_20210926T160120.csv
 Elapsed time 12.090039
@@ -117,10 +120,11 @@ port         0       1       2       3
      3     100     100     100
 
 Test: PASS
-
+```
 Prior to starting the test there was no activity shown on the switch ports under test
 
 Removed the cable to switch port index 2 prior to starting the test, to cause a fault:
+```
 C:\Users\mr_halfword\switch_test\Debug>switch_test \Device\NPF_{478AF94A-7EC1-4E69-A500-E966D8ECCBDF}
 Saving frame results to frames_20210926T160255.csv
 Elapsed time 12.090052
@@ -137,11 +141,13 @@ port         0       1       2       3
      3     100     100       0
 
 Test: FAIL
-
+```
 
 Change the switch under test to be a Level One GSW-2472TGX
+
 The LEDS on port index 0 where flashing on the injection switch and switch under test prior to starting the test,
 which reported some missing frames for port index 0:
+```
 C:\Users\mr_halfword\switch_test\Debug>switch_test \Device\NPF_{478AF94A-7EC1-4E69-A500-E966D8ECCBDF}
 Saving frame results to frames_20210926T162611.csv
 Elapsed time 12.090030
@@ -158,17 +164,18 @@ port         0       1       2       3
      3      13     100     100
 
 Test: FAIL
-
+```
 However, on investigation the cable used for port index 0 was suspect as the issue:
-a. Followed the cable when moved to a different port.
-b. Went away when replaced the cable.
+1. Followed the cable when moved to a different port.
+1. Went away when replaced the cable.
 
 
-==========================
+-----------------------------
 
 The number of ports used was inceased to 7, with the switch under test the Level One GSW-2472TGX
 
 The VLAN configuration in the injection switch:
+```
 DES-3526:4#show vlan
 Command: show vlan
 
@@ -237,8 +244,9 @@ Static Untagged ports  : 15
 Forbidden ports :
 
 Total Entries : 8
-
+```
 A test pass with all cables connected:
+```
 C:\Users\mr_halfword\switch_test\Debug>switch_test \Device\NPF_{478AF94A-7EC1-4E69-A500-E966D8ECCBDF}
 Saving frame results to frames_20210926T175550.csv
 Elapsed time 42.090049
@@ -258,9 +266,10 @@ port         0       1       2       3       4       5       6
      6     100     100     100     100     100     100
 
 Test: PASS
-
+```
 
 An failure introduced by removing the cable for port index 3:
+```
 C:\Users\mr_halfword\switch_test\Debug>switch_test \Device\NPF_{478AF94A-7EC1-4E69-A500-E966D8ECCBDF}
 Saving frame results to frames_20210926T175922.csv
 Elapsed time 42.090076
@@ -280,9 +289,9 @@ port         0       1       2       3       4       5       6
      6     100     100     100       0     100     100
 
 Test: FAIL
+```
 
-
-== Realtek PCIe GBE Family Controller not capturing VLAN tags under Windows 10 20H2 ==
+## Realtek PCIe GBE Family Controller not capturing VLAN tags under Windows 10 20H2
 
 Running the switch_test under Windows 10 home 20H2 with a "Realtek PCIe GBE Family Controller" reports all frames missed.
 
@@ -297,22 +306,22 @@ Under the adapter Advanced settings changed "Priority & VLAN" from "Priority & V
 After that change the received VLAN tags were still stipped. Therefore, reverted the change.
 
 Followed http://forum.gns3.net/topic7559.html :
-2. Once installed, went to my regedit in: HKEY_LOCAL_MACHINE\SYSTEM\ControlSet001\Control\Class\{4D36E972-E325-11CE-BFC1-08002BE10318}\00nn
+1. Once installed, went to my regedit in: `HKEY_LOCAL_MACHINE\SYSTEM\ControlSet001\Control\Class\{4D36E972-E325-11CE-BFC1-08002BE10318}\00nn`
 Where nn is the physical instance of the network port where you want to capture the VLAN tags.
-
-3. Added / Edited the following DWORDS:
-
-MonitorModeEnabled - 1
-MonitorMode - 1
-*PriorityVLANTag - 0
-SkDisableVlanStrip - 1
-
-Where the actual path was Computer\HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Class\{4d36e972-e325-11ce-bfc1-08002be10318}\0001
+2. Added / Edited the following DWORDS:
+   ```
+   MonitorModeEnabled - 1
+   MonitorMode - 1
+   *PriorityVLANTag - 0
+   SkDisableVlanStrip - 1
+   ```
+Where the actual path was `Computer\HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Class\{4d36e972-e325-11ce-bfc1-08002be10318}\0001`
 i.e. instance 1.
 
 After a reboot when VLAN tags were no longer stripped upon receipt.
 
 On the first run only ports 1-4 were reported as working:
+```
 C:\Users\mr_halfword\switch_test\Release>switch_test.exe -i \Device\NPF_{430850D4-29A0-4350-999F-67F14C708174} -d
 Using interface \Device\NPF_{430850D4-29A0-4350-999F-67F14C708174} (Realtek PCIe GBE Family Controller)
 Test interval = 10 (secs)
@@ -351,8 +360,9 @@ Source  Destination ports --->
     23  AAAAAAAAAAAAAAAAAAAAAA A
     24  AAAAAAAAAAAAAAAAAAAAAAA
 Total test intervals with failures = 1 : last failure NOW
-
+```
 After rebooting the LevelOne GSW-2472TGX switch under test, via its serial console, the next test was successful:
+```
 C:\Users\mr_halfword\switch_test\Release>switch_test.exe -i \Device\NPF_{430850D4-29A0-4350-999F-67F14C708174} -d
 Using interface \Device\NPF_{430850D4-29A0-4350-999F-67F14C708174} (Realtek PCIe GBE Family Controller)
 Test interval = 10 (secs)
@@ -391,12 +401,11 @@ Source  Destination ports --->
     23  ...................... .
     24  .......................
 Total test intervals with failures = 0
-
+```
 Had some more instances on only ports 1 to 4 working, and from the serial console could see that the LevelOne GSW-2472TGX switch
 had been rebooting itself.
 
-
-== Maximum frame length allowing for VLAN tag ==
+## Maximum frame length allowing for VLAN tag
 
 The orignal code set the size of ethercat_frame_t to 1514, which was the maximum specified in IEEE 802.3 prior to the
 definition of the optional VLAN tag.
@@ -405,13 +414,16 @@ https://en.wikipedia.org/wiki/Ethernet_frame notes that the IEEE 802.3ac specifi
 increased the maximum frame size by 4 octets to allow for the encapsulated VLAN tag
 
 When the code was re-compiled to increase ethercat_frame_t to 1518 then PC with the Intel(R) 82579V Gigabit Network adapter:
-a. Running Linux (3.10 Kernel) that the code ran successfully, and Wireshark showed the increase in the frame size.
-b. Running under Windows 10 failed with:
-Error sending the packet: send error: PacketSendPacket failed: A device attached to the system is not functioning.  (31)
+1. Running Linux (3.10 Kernel) that the code ran successfully, and Wireshark showed the increase in the frame size.
+1. Running under Windows 10 failed with:
+   ```
+   Error sending the packet: send error: PacketSendPacket failed: A device attached to the system is not functioning.  (31)
+   ```
 
-PacketSendPacket(), the function returning the error, is from the PACKET.DLL packet capture driver
+`PacketSendPacket()`, the function returning the error, is from the PACKET.DLL packet capture driver
 
 Under Windows 10 the MTU is reported as 1500:
+```
 C:\Users\mr_halfword\switch_test\Release>netsh interface ipv4 show subinterface
 
    MTU  MediaSenseState   Bytes In  Bytes Out  Interface
@@ -419,12 +431,14 @@ C:\Users\mr_halfword\switch_test\Release>netsh interface ipv4 show subinterface
 4294967295                1          0       8065  Loopback Pseudo-Interface 1
   1500                1   31410294    4207260  Ethernet 3
   1500                1          0      42376  vEthernet (Default Switch)
-
+```
 Tried increasing the MTU by 4 bytes (as administrator):
+```
 C:\WINDOWS\system32>netsh interface ipv4 set subinterface "Ethernet 3" mtu=1504 store=persistent
 Ok.
-
+```
 Which reads back as changed:
+```
 C:\Users\mr_halfword\switch_test\Release>netsh interface ipv4 show subinterface
 
    MTU  MediaSenseState   Bytes In  Bytes Out  Interface
@@ -432,7 +446,7 @@ C:\Users\mr_halfword\switch_test\Release>netsh interface ipv4 show subinterface
 4294967295                1          0       8065  Loopback Pseudo-Interface 1
   1504                1   31413790    4209263  Ethernet 3
   1500                1          0      43184  vEthernet (Default Switch)
-
+```
 But still fails, and a re-boot didn't help.
 
 The same issue occurred on the Windows 10 laptop with a "Realtek PCIe GBE Family Controller"
@@ -440,41 +454,29 @@ The same issue occurred on the Windows 10 laptop with a "Realtek PCIe GBE Family
 Due to the above reverted the MTU to the original value of 1500.
 
 What did work is enabling Jumbo Frames:
-a. For the "Realtek PCIe GBE Family Controller" in the Device Manager in Advanced changed the "Jumbo Frame"
-   from "Disabled" to "2KB MTU".
-b. For the "Intel(R) 82579V Gigabit Network" in the Device Manager in Advanced changed the "Jumbo Packet"
-   from "Disabled" to "4088 Bytes".
-c. For the "Mellanox ConnectX-2 Ethernet Adapter" in the Device Manager in Advanced changed the "Jumbo Packet"
-   from "1514" to "9600".
-d. For the "Mellanox ConnectX-4 Lx Ethernet Adapter" in the Device Manager in Advanced changed the "Jumbo Packet"
-   from "1514" to "9600".
+1. For the "Realtek PCIe GBE Family Controller" in the Device Manager in Advanced changed the "Jumbo Frame" from "Disabled" to "2KB MTU".
+1. For the "Intel(R) 82579V Gigabit Network" in the Device Manager in Advanced changed the "Jumbo Packet" from "Disabled" to "4088 Bytes".
+1. For the "Mellanox ConnectX-2 Ethernet Adapter" in the Device Manager in Advanced changed the "Jumbo Packet" from "1514" to "9600".
+1. For the "Mellanox ConnectX-4 Lx Ethernet Adapter" in the Device Manager in Advanced changed the "Jumbo Packet" from "1514" to "9600".
 
-
-== Mellanox ConnectX-2 not capturing VLAN tags under Windows 10 21H1 ==
+## Mellanox ConnectX-2 not capturing VLAN tags under Windows 10 21H1
 
 Running the switch_test under Windows 10 pro 21H1 with a "Mellanox ConnectX-2" reports all frames missed.
 
 The debug capture shows the test frames reported as "Rx Other" due to their being no VLAN tag.
 
-Can't find any documented way to stop the VLAN tags from being stripped on receipt when using the
-regular network stack.
+Can't find any documented way to stop the VLAN tags from being stripped on receipt when using the regular network stack.
 
-With the same computer booted into Ubuntu 18.04 the frames received from the Mellanox ConnectX-2
-had the VLAN tag. I.e. appears to be a Windows driver limitation.
+With the same computer booted into Ubuntu 18.04 the frames received from the Mellanox ConnectX-2 had the VLAN tag. I.e. appears to be a Windows driver limitation.
 
-
-== Mellanox ConnectX-4 Lx (MCX4121A-XCAT) not capturing VLAN tags under Windows 10 21H1 ==
+## Mellanox ConnectX-4 Lx (MCX4121A-XCAT) not capturing VLAN tags under Windows 10 21H1
 
 Same issue as with the Mellanox ConnectX-2 above.
 
-With the same computer booted into AlmaLinux 8.5 the frames received from the Mellanox ConnectX-4 Lx
-had the VLAN tag. I.e. appears to be a Windows driver limitation.
+With the same computer booted into AlmaLinux 8.5 the frames received from the Mellanox ConnectX-4 Lx had the VLAN tag. I.e. appears to be a Windows driver limitation.
 
 The same issue occured with with both:
-a. The as-delivered firmware version 14.25.1020.
-b. After updating to the latest firmware version 14.32.1010.
+1. The as-delivered firmware version 14.25.1020.
+1. After updating to the latest firmware version 14.32.1010.
 
-https://docs.nvidia.com/networking/display/winof2v280/Configuring+the+Driver+Registry+Keys
-documents the registry keys available in WinOF-2 v2.80 which supports the ConnectX-4 Lx
-which was used to install the Windows drivers.
-
+https://docs.nvidia.com/networking/display/winof2v280/Configuring+the+Driver+Registry+Keys documents the registry keys available in WinOF-2 v2.80 which supports the ConnectX-4 Lx which was used to install the Windows drivers.
