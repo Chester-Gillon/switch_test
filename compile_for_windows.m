@@ -26,7 +26,17 @@ mingw_path=fullfile(compiler_info(mingw_index).Location,'bin');
 gcc_exe = fullfile (mingw_path, 'gcc');
 
 % Directories to find the NPCAP SDK files to build against.
-npcap_root = 'C:\npcap-sdk-1.10';
+npcap_root = '';
+npcap_roots = {'C:\npcap-sdk-1.10', 'C:\npcap-sdk-1.15'};
+for path_index = 1:length(npcap_roots)
+    if isfolder (npcap_roots{path_index})
+        npcap_root = npcap_roots{path_index};
+    end
+end
+if isempty(npcap_root)
+    fprintf ('Unable to locate NPCAP SDK\n');
+    return
+end
 npcap_include_dir = fullfile (npcap_root, 'Include');
 npcap_lib_dir = fullfile (npcap_root, 'Lib', 'x64');
 
