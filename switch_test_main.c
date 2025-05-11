@@ -297,6 +297,11 @@ static double arg_tested_port_mbps = DEFAULT_TESTED_PORT_MBPS;
 static bool arg_frame_debug_enabled = false;
 
 
+/* Command line argument which enables a filter to only receive packets which have EtherCAT protocol
+   encapsulated within a VLAN. */
+static bool arg_rx_filter_enabled = false;
+
+
 /* Used to store pending receive frames for one source / destination port combination.
  * As frames are transmitted they are stored in, and then removed once received.
  *
@@ -543,7 +548,7 @@ static void display_available_interfaces (void)
  */
 static void display_usage (const char *const program_name)
 {
-    printf ("Usage %s: -i <pcap_interface_name> [-t <duration_secs>] [-d] [-p <port_list>] [-s <rate_mbps>] [-r <rate_mbps>]\n", program_name);
+    printf ("Usage %s: -i <pcap_interface_name> [-t <duration_secs>] [-d] [-p <port_list>] [-s <rate_mbps>] [-r <rate_mbps>] [-f]\n", program_name);
     printf ("\n");
     printf ("  -i specifies the name of the PCAP interface to send/receive frames on\n");
     display_available_interfaces ();
@@ -561,6 +566,8 @@ static void display_usage (const char *const program_name)
     printf ("     Default is %d\n", DEFAULT_INJECTION_PORT_MBPS);
     printf ("  -r Specifies the bit rate generated on each port on the switch under test,\n");
     printf ("     as a floating point mega bits per second. Default is %g\n", DEFAULT_TESTED_PORT_MBPS);
+    printf ("  -f Enables setting a filter to only receive packets which have EtherCAT protocol\n");
+    printf ("     encapsulated within a VLAN\n");
 
     exit (EXIT_FAILURE);
 }
@@ -693,7 +700,7 @@ static void parse_tested_port_list (const char *const port_list_in)
 static void read_command_line_arguments (const int argc, char *argv[])
 {
     const char *const program_name = argv[0];
-    const char *const optstring = "i:dt:p:s:r:";
+    const char *const optstring = "i:dt:p:s:r:f";
     bool pcap_interface_specified = false;
     int option;
     char junk;
@@ -748,6 +755,10 @@ static void read_command_line_arguments (const int argc, char *argv[])
                 printf ("Error: Invalid <rate_mbps> %s\n", optarg);
                 exit (EXIT_FAILURE);
             }
+            break;
+
+        case 'f':
+            arg_rx_filter_enabled = true;
             break;
 
         case '?':
@@ -897,12 +908,16 @@ static pcap_t *open_interface (const char *const interface_name)
     /* Capture only the receive frames, and not our transmit frames */
 
     /* This has been commented out since with a Intel Corporation 82579V Gigabit Network Connection:
-       a. Under Windows 10 failed with PCAP_ERROR.
+       a. Under Windows 10 using npcap-sdk-1.10 failed with PCAP_ERROR.
        b. Under CentOS 6.10 with a 3.10.33-rt32.33.el6rt.x86_64 Kernel with libpcap 1.4.0:
           - When pcap_next_ex() is called from the same thread as that which calls pcap_sendpacket() then didn't capture
             a copy of the transmit frames regardless of if pcap_setdirection() was called.
-          - When pcap_next_ex() is called from a different as that which calls pcap_sendpacket() then captured
+          - When pcap_next_ex() is called from a different thread as that which calls pcap_sendpacket() then captured
             a copy of the transmit frames regardless of if pcap_setdirection() was called.
+       c. Under Windows 11 using npcap-sdk-1.15 failed with PCAP_ERROR.
+
+          Found https://github.com/nmap/npcap/issues/248 and https://github.com/nmap/npcap/issues/648
+          which explains that isn't supportd under Windows.
     rc = pcap_setdirection (pcap_handle, PCAP_D_IN);
     if (rc != 0)
     {
@@ -911,35 +926,40 @@ static pcap_t *open_interface (const char *const interface_name)
     }
     */
 
-    /* Set a filter to only receive packets which have EtherCAT protocol encapsulated within a VLAN,
-     * which are those sent/received by the test program.
-     * I.e. filter out packets for other traffic.
-     * The filter has to be compiled after the pcap handle has been activited, so that the link-layer is known. */
-
-    /* This has been commented out since with a Intel Corporation 82579V Gigabit Network Connection:
-       a. Under Windows 10 the filter worked as expected.
-       b. Under CentOS 6.10 with a 3.10.33-rt32.33.el6rt.x86_64 Kernel with libpcap 1.4.0 the filter had the effect of not 
-          capturing any receive EtherCAT frames, and only capturing the transmitted frames.
-          The same issue occurred when using the same filter in Wireshark.
-
-    char filter_command[80];
-    struct bpf_program filter_program;
-    snprintf (filter_command, sizeof (filter_command), "vlan&&ether proto 0x%x", ETH_P_ETHERCAT);
-    const int optimize = 1;
-    rc = pcap_compile (pcap_handle, &filter_program, filter_command, optimize, 0xffffffff);
-    if (rc != 0)
+    if (arg_rx_filter_enabled)
     {
-        console_printf ("Error in pcap_compile(): %s\n", pcap_statustostr (rc));
-        exit (EXIT_FAILURE);
-    }
+        /* Set a filter to only receive packets which have EtherCAT protocol encapsulated within a VLAN,
+         * which are those sent/received by the test program.
+         * I.e. filter out packets for other traffic.
+         * The filter has to be compiled after the pcap handle has been activited, so that the link-layer is known. */
 
-    rc = pcap_setfilter (pcap_handle, &filter_program);
-    if (rc != 0)
-    {
-        console_printf ("Error in pcap_setfilter(): %s\n", pcap_statustostr (rc));
-        exit (EXIT_FAILURE);
+        /* This is optional since with a Intel Corporation 82579V Gigabit Network Connection:
+           a. Under Windows 10 the filter worked as expected.
+           b. Under CentOS 6.10 with a 3.10.33-rt32.33.el6rt.x86_64 Kernel with libpcap 1.4.0 the filter had the effect of not 
+              capturing any receive EtherCAT frames, and only capturing the transmitted frames.
+              The same issue occurred when using the same filter in Wireshark.
+              
+              Under AlmaLinux 8.10 with a 4.18.0-553.51.1.el8_10.x86_64 Kernel with libpcap 1.9.1 the filter didn't
+              break the test. */
+
+        char filter_command[80];
+        struct bpf_program filter_program;
+        snprintf (filter_command, sizeof (filter_command), "vlan&&ether proto 0x%x", ETH_P_ETHERCAT);
+        const int optimize = 1;
+        rc = pcap_compile (pcap_handle, &filter_program, filter_command, optimize, 0xffffffff);
+        if (rc != 0)
+        {
+            console_printf ("Error in pcap_compile(): %s\n", pcap_statustostr (rc));
+            exit (EXIT_FAILURE);
+        }
+
+        rc = pcap_setfilter (pcap_handle, &filter_program);
+        if (rc != 0)
+        {
+            console_printf ("Error in pcap_setfilter(): %s\n", pcap_statustostr (rc));
+            exit (EXIT_FAILURE);
+        }
     }
-    */
 
     /* Check the interface is Ethernet */
     const int link_layer = pcap_datalink (pcap_handle);
@@ -1823,6 +1843,7 @@ int main (int argc, char *argv[])
     console_printf ("Using interface %s (%s)\n", arg_pcap_interface_name, interface_description);
     console_printf ("Test interval = %" PRIi64 " (secs)\n", arg_test_interval_secs);
     console_printf ("Frame debug enabled = %s\n", arg_frame_debug_enabled ? "Yes" : "No");
+    console_printf ("Rx filter enabled = %s\n", arg_rx_filter_enabled ? "Yes" : "No");
 
     /* Create the transmit_receive_thread */
     pthread_t tx_rx_thread_handle;
