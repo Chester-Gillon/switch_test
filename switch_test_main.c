@@ -302,6 +302,10 @@ static bool arg_frame_debug_enabled = false;
 static bool arg_rx_filter_enabled = false;
 
 
+/* Command line argument which enables use of pcap_open(), rather than pcap_create() */
+static bool arg_use_pcap_open = false;
+
+
 /* Used to store pending receive frames for one source / destination port combination.
  * As frames are transmitted they are stored in, and then removed once received.
  *
@@ -548,7 +552,7 @@ static void display_available_interfaces (void)
  */
 static void display_usage (const char *const program_name)
 {
-    printf ("Usage %s: -i <pcap_interface_name> [-t <duration_secs>] [-d] [-p <port_list>] [-s <rate_mbps>] [-r <rate_mbps>] [-f]\n", program_name);
+    printf ("Usage %s: -i <pcap_interface_name> [-t <duration_secs>] [-d] [-p <port_list>] [-s <rate_mbps>] [-r <rate_mbps>] [-f] [-o]\n", program_name);
     printf ("\n");
     printf ("  -i specifies the name of the PCAP interface to send/receive frames on\n");
     display_available_interfaces ();
@@ -568,6 +572,7 @@ static void display_usage (const char *const program_name)
     printf ("     as a floating point mega bits per second. Default is %g\n", DEFAULT_TESTED_PORT_MBPS);
     printf ("  -f Enables setting a filter to only receive packets which have EtherCAT protocol\n");
     printf ("     encapsulated within a VLAN\n");
+    printf ("  -o enables use of pcap_open(), rather than pcap_create()\n");
 
     exit (EXIT_FAILURE);
 }
@@ -700,7 +705,7 @@ static void parse_tested_port_list (const char *const port_list_in)
 static void read_command_line_arguments (const int argc, char *argv[])
 {
     const char *const program_name = argv[0];
-    const char *const optstring = "i:dt:p:s:r:f";
+    const char *const optstring = "i:dt:p:s:r:fo";
     bool pcap_interface_specified = false;
     int option;
     char junk;
@@ -759,6 +764,10 @@ static void read_command_line_arguments (const int argc, char *argv[])
 
         case 'f':
             arg_rx_filter_enabled = true;
+            break;
+
+        case 'o':
+            arg_use_pcap_open = true;
             break;
 
         case '?':
@@ -842,22 +851,8 @@ static pcap_t *open_interface (const char *const interface_name)
 {
     int rc;
     char errbuf[PCAP_ERRBUF_SIZE];
-    pcap_t *const pcap_handle = pcap_create (interface_name, errbuf);
-
-    if (pcap_handle == NULL)
-    {
-        console_printf ("Error in pcap_create(): %s\n", errbuf);
-        exit (EXIT_FAILURE);
-    }
-
-    /* Need to enable promiscuous mode to receive the test packets from the switch */
-    const int promisc_enable = 1;
-    rc = pcap_set_promisc (pcap_handle, promisc_enable);
-    if (rc != 0)
-    {
-        console_printf ("Error in pcap_set_promisc(): %s\n", pcap_statustostr (rc));
-        exit (EXIT_FAILURE);
-    }
+    pcap_t *pcap_handle = NULL;
+    const int no_timeout = -1;
 
     /* Capture the minimum length of the test packets, of which the last field checked is Address which contains the 
      * sequence number. Uses the offset for the first non-bit field after Address.
@@ -866,43 +861,89 @@ static pcap_t *open_interface (const char *const interface_name)
      * on the assumption that any corruption at the link-level will invalidate the CRC and the switches and/or network
      * adapter will drop the frames with an invalid CRC which the test will then reported as "missed". */
     const int max_snaplen = offsetof (ethercat_frame_t, IRQ);
-    rc = pcap_set_snaplen (pcap_handle, max_snaplen);
-    if (rc != 0)
-    {
-        console_printf ("Error in pcap_set_snaplen(): %s\n", pcap_statustostr (rc));
-        exit (EXIT_FAILURE);
-    }
 
-    /* Enable immediate receive mode as use polling to alternate between sending at a specified rate and
-     * checking for the receipt of the test packets. */
-    const int immediate_mode = 1;
-    rc = pcap_set_immediate_mode (pcap_handle, immediate_mode);
-    if (rc != 0)
+    if (arg_use_pcap_open)
     {
-        console_printf ("Error in pcap_set_immediate_mode(): %s\n", pcap_statustostr (rc));
-        exit (EXIT_FAILURE);
-    }
+#ifdef _WIN32
+        /* Use pcap_open() to make use of the Windows only PCAP_OPENFLAG_NOCAPTURE_LOCAL to avoid
+           receiving a copy of the transmitted frames.
+           
+           This is a work-around for pcap_setdirection() not being supported under Windows. */
+        const int flags = PCAP_SRC_IFLOCAL |
+            PCAP_OPENFLAG_PROMISCUOUS |
+            PCAP_OPENFLAG_NOCAPTURE_LOCAL |
+            PCAP_OPENFLAG_MAX_RESPONSIVENESS;
 
-    /* Disable the timeout to allow pcap_next_ex() to poll for packets.
-       From the documentation this might not be supported on all systems, but has worked on Windows 10 and a Linux 3.10 Kernel. */
-    const int no_timeout = -1;
-    rc = pcap_set_timeout (pcap_handle, no_timeout);
-    if (rc != 0)
-    {
-        console_printf ("Error in pcap_set_timeout(): %s\n", pcap_statustostr (rc));
+        pcap_handle = pcap_open (interface_name, max_snaplen, flags, no_timeout, NULL, errbuf);
+        if (pcap_handle == NULL)
+        {
+            console_printf ("Error in pcap_open(): %s\n", errbuf);
+            exit (EXIT_FAILURE);
+        }
+#else
+        /* With libpcap-1.9.1-5 on AlmaLinux 8.10 pcap.h has a prototype visible for pcap_open()
+           However, that function isn't in the shared library. */
+        console_printf ("pcap_open() isn't supported under Linux\n");
         exit (EXIT_FAILURE);
+#endif
     }
-    
-    /* Activate the interface for use */
-    rc = pcap_activate (pcap_handle);
-    if (rc < 0)
+    else
     {
-        console_printf ("Error in pcap_activate(): %s\n", pcap_statustostr (rc));
-        exit (EXIT_FAILURE);
-    }
-    else if (rc > 0)
-    {
-        console_printf ("Warning in pcap_activate(): %s\n", pcap_statustostr (rc));
+        pcap_handle = pcap_create (interface_name, errbuf);
+
+        if (pcap_handle == NULL)
+        {
+            console_printf ("Error in pcap_create(): %s\n", errbuf);
+            exit (EXIT_FAILURE);
+        }
+
+        /* Need to enable promiscuous mode to receive the test packets from the switch */
+        const int promisc_enable = 1;
+        rc = pcap_set_promisc (pcap_handle, promisc_enable);
+        if (rc != 0)
+        {
+            console_printf ("Error in pcap_set_promisc(): %s\n", pcap_statustostr (rc));
+            exit (EXIT_FAILURE);
+        }
+
+        /* Set the requirement snaplen for the test */
+        rc = pcap_set_snaplen (pcap_handle, max_snaplen);
+        if (rc != 0)
+        {
+            console_printf ("Error in pcap_set_snaplen(): %s\n", pcap_statustostr (rc));
+            exit (EXIT_FAILURE);
+        }
+
+        /* Enable immediate receive mode as use polling to alternate between sending at a specified rate and
+        * checking for the receipt of the test packets. */
+        const int immediate_mode = 1;
+        rc = pcap_set_immediate_mode (pcap_handle, immediate_mode);
+        if (rc != 0)
+        {
+            console_printf ("Error in pcap_set_immediate_mode(): %s\n", pcap_statustostr (rc));
+            exit (EXIT_FAILURE);
+        }
+
+        /* Disable the timeout to allow pcap_next_ex() to poll for packets.
+        From the documentation this might not be supported on all systems, but has worked on Windows 10 and a Linux 3.10 Kernel. */
+        rc = pcap_set_timeout (pcap_handle, no_timeout);
+        if (rc != 0)
+        {
+            console_printf ("Error in pcap_set_timeout(): %s\n", pcap_statustostr (rc));
+            exit (EXIT_FAILURE);
+        }
+
+        /* Activate the interface for use */
+        rc = pcap_activate (pcap_handle);
+        if (rc < 0)
+        {
+            console_printf ("Error in pcap_activate(): %s\n", pcap_statustostr (rc));
+            exit (EXIT_FAILURE);
+        }
+        else if (rc > 0)
+        {
+            console_printf ("Warning in pcap_activate(): %s\n", pcap_statustostr (rc));
+        }
     }
 
     /* Capture only the receive frames, and not our transmit frames */
@@ -1844,6 +1885,7 @@ int main (int argc, char *argv[])
     console_printf ("Test interval = %" PRIi64 " (secs)\n", arg_test_interval_secs);
     console_printf ("Frame debug enabled = %s\n", arg_frame_debug_enabled ? "Yes" : "No");
     console_printf ("Rx filter enabled = %s\n", arg_rx_filter_enabled ? "Yes" : "No");
+    console_printf ("Use pcap_open() = %s\n", arg_use_pcap_open ? "Yes" : "No");
 
     /* Create the transmit_receive_thread */
     pthread_t tx_rx_thread_handle;
