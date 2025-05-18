@@ -306,6 +306,16 @@ static bool arg_rx_filter_enabled = false;
 static bool arg_use_pcap_open = false;
 
 
+/* Argument which specifies the length of the packets to capture.
+ * Default is to capture the minimum length of the test packets, of which the last field checked is Address
+ * which contains the sequence number.
+ *
+ * While the transmitted frames contain a test pattern in the data[] this program doesn't verify the test pattern,
+ * on the assumption that any corruption at the link-level will invalidate the CRC and the switches and/or network
+ * adapter will drop the frames with an invalid CRC which the test will then reported as "missed". */
+static int arg_snaplen = offsetof (ethercat_frame_t, Address) + sizeof (((ethercat_frame_t *)0)->Address);
+
+
 /* Used to store pending receive frames for one source / destination port combination.
  * As frames are transmitted they are stored in, and then removed once received.
  *
@@ -552,7 +562,7 @@ static void display_available_interfaces (void)
  */
 static void display_usage (const char *const program_name)
 {
-    printf ("Usage %s: -i <pcap_interface_name> [-t <duration_secs>] [-d] [-p <port_list>] [-s <rate_mbps>] [-r <rate_mbps>] [-f] [-o]\n", program_name);
+    printf ("Usage %s: -i <pcap_interface_name> [-t <duration_secs>] [-d] [-p <port_list>] [-s <rate_mbps>] [-r <rate_mbps>] [-f] [-o] [-l <snaplen>]\n", program_name);
     printf ("\n");
     printf ("  -i specifies the name of the PCAP interface to send/receive frames on\n");
     display_available_interfaces ();
@@ -573,6 +583,7 @@ static void display_usage (const char *const program_name)
     printf ("  -f Enables setting a filter to only receive packets which have EtherCAT protocol\n");
     printf ("     encapsulated within a VLAN\n");
     printf ("  -o enables use of pcap_open(), rather than pcap_create()\n");
+    printf ("  -l specifies the snaplen captured. An argument to see if affects performance\n");
 
     exit (EXIT_FAILURE);
 }
@@ -705,7 +716,7 @@ static void parse_tested_port_list (const char *const port_list_in)
 static void read_command_line_arguments (const int argc, char *argv[])
 {
     const char *const program_name = argv[0];
-    const char *const optstring = "i:dt:p:s:r:fo";
+    const char *const optstring = "i:dt:p:s:r:fol:";
     bool pcap_interface_specified = false;
     int option;
     char junk;
@@ -768,6 +779,14 @@ static void read_command_line_arguments (const int argc, char *argv[])
 
         case 'o':
             arg_use_pcap_open = true;
+            break;
+
+        case 'l':
+            if (sscanf (optarg, "%d%c", &arg_snaplen, &junk) != 1)
+            {
+                printf ("Error: Invalid <snaplen> %s\n", optarg);
+                exit (EXIT_FAILURE);
+            }
             break;
 
         case '?':
@@ -854,14 +873,6 @@ static pcap_t *open_interface (const char *const interface_name)
     pcap_t *pcap_handle = NULL;
     const int no_timeout = -1;
 
-    /* Capture the minimum length of the test packets, of which the last field checked is Address which contains the 
-     * sequence number. Uses the offset for the first non-bit field after Address.
-     *
-     * While the transmitted frames contain a test pattern in the data[] this program doesn't verify the test pattern,
-     * on the assumption that any corruption at the link-level will invalidate the CRC and the switches and/or network
-     * adapter will drop the frames with an invalid CRC which the test will then reported as "missed". */
-    const int max_snaplen = offsetof (ethercat_frame_t, IRQ);
-
     if (arg_use_pcap_open)
     {
 #ifdef _WIN32
@@ -874,7 +885,7 @@ static pcap_t *open_interface (const char *const interface_name)
             PCAP_OPENFLAG_NOCAPTURE_LOCAL |
             PCAP_OPENFLAG_MAX_RESPONSIVENESS;
 
-        pcap_handle = pcap_open (interface_name, max_snaplen, flags, no_timeout, NULL, errbuf);
+        pcap_handle = pcap_open (interface_name, arg_snaplen, flags, no_timeout, NULL, errbuf);
         if (pcap_handle == NULL)
         {
             console_printf ("Error in pcap_open(): %s\n", errbuf);
@@ -907,7 +918,7 @@ static pcap_t *open_interface (const char *const interface_name)
         }
 
         /* Set the requirement snaplen for the test */
-        rc = pcap_set_snaplen (pcap_handle, max_snaplen);
+        rc = pcap_set_snaplen (pcap_handle, arg_snaplen);
         if (rc != 0)
         {
             console_printf ("Error in pcap_set_snaplen(): %s\n", pcap_statustostr (rc));
@@ -1886,6 +1897,7 @@ int main (int argc, char *argv[])
     console_printf ("Frame debug enabled = %s\n", arg_frame_debug_enabled ? "Yes" : "No");
     console_printf ("Rx filter enabled = %s\n", arg_rx_filter_enabled ? "Yes" : "No");
     console_printf ("Use pcap_open() = %s\n", arg_use_pcap_open ? "Yes" : "No");
+    console_printf ("snaplen = %d\n", arg_snaplen);
 
     /* Create the transmit_receive_thread */
     pthread_t tx_rx_thread_handle;
