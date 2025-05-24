@@ -519,6 +519,76 @@ static void console_printf (const char *const format, ...)
 }
 
 
+#ifdef _WIN32
+/**
+ * @brief Windows specific function to use the registry to find the friendly name for a PCAP interface name
+ * @details
+ *   The PCAP interface name under Windows is a UUID which:
+ *   a. The user can't edit
+ *   b. Doesn't appear in Windows settings.
+ *
+ *   Whereas the friendly name appears in the Windows setting and can be edited by the user.
+ * @param[in] interface_name The PCAP interface name to find the friendly name for
+ * @param[out] friendly_name The friendly name for the PCAP interface
+ * @return Returns true if the friendly name was obtained, or false otherwise
+ */
+static bool get_windows_friendly_name_for_interface (const char *const interface_name, char friendly_name[PATH_MAX])
+{
+    bool got_friendly_name = false;
+    char registry_sub_key[PATH_MAX];
+    LSTATUS status;
+
+    /* The PCAP device name under is of the form \Device\NPF_{<GUID>}.
+       Locate the start of the {<GUID>} for use in a registry key. */
+    const char *const dev_guid = strchr (interface_name, '{');
+
+    if (dev_guid != NULL)
+    {
+        DWORD friendly_name_len = PATH_MAX;
+        snprintf (registry_sub_key, sizeof (registry_sub_key),
+                  "SYSTEM\\CurrentControlSet\\Control\\Network\\{4D36E972-E325-11CE-BFC1-08002BE10318}\\%s\\Connection",
+                  dev_guid);
+        status = RegGetValue (HKEY_LOCAL_MACHINE, registry_sub_key, "Name", RRF_RT_REG_SZ, NULL,
+                              friendly_name, &friendly_name_len);
+        got_friendly_name = status == ERROR_SUCCESS;
+    }
+
+    return got_friendly_name;
+}
+
+
+/**
+ * @brief Under Windows if the command line interface specified a friendly name, convert to the PCAP interface name
+ */
+static void windows_convert_friendly_name_to_pcap_interface (void)
+{
+    pcap_if_t *alldevs;
+    pcap_if_t *dev;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    int rc;
+    char friendly_name[PATH_MAX];
+    bool converted_friendly_name = false;
+
+    rc = pcap_findalldevs (&alldevs, errbuf);
+    if (rc == 0)
+    {
+        for (dev = alldevs; !converted_friendly_name && (dev != NULL); dev = dev->next)
+        {
+            if (get_windows_friendly_name_for_interface (dev->name, friendly_name))
+            {
+                if (strcmp (arg_pcap_interface_name, friendly_name) == 0)
+                {
+                    snprintf (arg_pcap_interface_name, sizeof (arg_pcap_interface_name), "%s", dev->name);
+                    converted_friendly_name = true;
+                }
+            }
+        }
+        pcap_freealldevs (alldevs);
+    }
+}
+#endif
+
+
 /**
  * @brief Display the available PCAP interfaces
  * @details The interface names can be passed on the command line to specify which interface on the PC to use to for the tests.
@@ -530,6 +600,9 @@ static void display_available_interfaces (void)
     pcap_if_t *dev;
     char errbuf[PCAP_ERRBUF_SIZE];
     int rc;
+#ifdef _WIN32
+    char friendly_name[PATH_MAX];
+#endif
     
     rc = pcap_findalldevs (&alldevs, errbuf);
     if (rc != 0)
@@ -544,12 +617,21 @@ static void display_available_interfaces (void)
         printf ("       %s", dev->name);
         if (dev->description != NULL)
         {
-            printf (" (%s)\n", dev->description);
+            printf (" (%s)", dev->description);
         }
         else
         {
-            printf (" (No description available)\n");
+            printf (" (No description available)");
         }
+
+#ifdef _WIN32
+        if (get_windows_friendly_name_for_interface (dev->name, friendly_name))
+        {
+            printf (" friendly name=\"%s\"", friendly_name);
+        }
+#endif
+
+        printf ("\n");
     }
 
     pcap_freealldevs (alldevs);
@@ -564,7 +646,8 @@ static void display_usage (const char *const program_name)
 {
     printf ("Usage %s: -i <pcap_interface_name> [-t <duration_secs>] [-d] [-p <port_list>] [-s <rate_mbps>] [-r <rate_mbps>] [-f] [-o] [-l <snaplen>]\n", program_name);
     printf ("\n");
-    printf ("  -i specifies the name of the PCAP interface to send/receive frames on\n");
+    printf ("  -i specifies the name of the PCAP interface to send/receive frames on.\n");
+    printf ("     Under Windows may also be the friendly name.\n");
     display_available_interfaces ();
     printf ("\n");
     printf ("  -d enables debug mode, where runs just for a single test interval and creates\n");
@@ -737,6 +820,9 @@ static void read_command_line_arguments (const int argc, char *argv[])
         {
         case 'i':
             snprintf (arg_pcap_interface_name, sizeof (arg_pcap_interface_name), "%s", optarg);
+#ifdef _WIN32
+            windows_convert_friendly_name_to_pcap_interface ();
+#endif
             pcap_interface_specified = true;
             break;
 
@@ -1892,7 +1978,16 @@ int main (int argc, char *argv[])
 
     /* Report the command line arguments used */
     console_printf ("Writing per-port counts to %s\n", results_summary.per_port_counts_csv_filename);
-    console_printf ("Using interface %s (%s)\n", arg_pcap_interface_name, interface_description);
+    console_printf ("Using interface %s (%s)", arg_pcap_interface_name, interface_description);
+#ifdef _WIN32
+    char friendly_name[PATH_MAX];
+
+    if (get_windows_friendly_name_for_interface (arg_pcap_interface_name, friendly_name))
+    {
+        console_printf (" friendly name=\"%s\"", friendly_name);
+    }
+#endif
+    console_printf ("\n");
     console_printf ("Test interval = %" PRIi64 " (secs)\n", arg_test_interval_secs);
     console_printf ("Frame debug enabled = %s\n", arg_frame_debug_enabled ? "Yes" : "No");
     console_printf ("Rx filter enabled = %s\n", arg_rx_filter_enabled ? "Yes" : "No");
